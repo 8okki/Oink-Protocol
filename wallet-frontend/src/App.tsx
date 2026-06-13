@@ -380,7 +380,7 @@ export default function App() {
         <div className="sidebar-footer">
           <div className="connection-pill connected">
             <span className="connection-dot"></span>
-            <span>Base Sepolia</span>
+            <span>Arc Testnet</span>
           </div>
         </div>
       </aside>
@@ -494,8 +494,8 @@ export default function App() {
                     <div className="wallet-details">
                       <div className="detail-row">
                         <span className="detail-label">Network</span>
-                        <span className="detail-value" style={{ background: 'rgba(139, 92, 246, 0.1)', color: 'var(--primary)', borderColor: 'rgba(139, 92, 246, 0.2)', borderWidth: '1px', borderStyle: 'solid' }}>
-                          Base Sepolia (Chain 84532)
+                        <span className="detail-value" style={{ background: 'rgba(219, 39, 119, 0.05)', color: 'var(--primary)', borderColor: 'rgba(219, 39, 119, 0.15)', borderWidth: '1px', borderStyle: 'solid' }}>
+                          Arc Testnet (Chain 5042002)
                         </span>
                       </div>
                       

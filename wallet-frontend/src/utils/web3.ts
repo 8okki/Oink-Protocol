@@ -1,8 +1,8 @@
 import { ethers } from "ethers";
 import { createSmartAccountClient } from "@biconomy/account";
 
-const BASE_SEPOLIA_RPC = "https://sepolia.base.org";
-const MOCK_USDC_CONTRACT = "0x036cbd53842c3b676a40f55cca3afd9ba3b666c6"; // Standard Base Sepolia USDC
+const ARC_TESTNET_RPC = "https://rpc.testnet.arc.network";
+const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000"; // Native Arc Testnet USDC (ERC-20 interface)
 
 export interface WalletDetails {
   privateKey: string;
@@ -32,17 +32,16 @@ export function resetEOA(): string {
 // Initialize Biconomy Smart Account
 export async function initBiconomyAccount(privateKey: string): Promise<WalletDetails> {
   try {
-    const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC);
+    const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
     const signer = new ethers.Wallet(privateKey, provider);
     
-    // We use a public Biconomy Base Sepolia bundler URL for demo purposes.
-    // In production, this would be customized.
-    const bundlerUrl = "https://bundler.biconomy.io/api/v2/84532/nPt4VTZQ6.5e9f1222-30d8-4f8b-b78f-6b22b10a26d7";
+    // We use a custom bundler URL targeting Arc Testnet (Chain ID 5042002) for Biconomy setup.
+    const bundlerUrl = "https://bundler.biconomy.io/api/v2/5042002/nPt4VTZQ6.5e9f1222-30d8-4f8b-b78f-6b22b10a26d7";
 
     const smartAccountClient = await createSmartAccountClient({
       signer,
       bundlerUrl,
-      rpcUrl: BASE_SEPOLIA_RPC,
+      rpcUrl: ARC_TESTNET_RPC,
     });
 
     const smartAccountAddress = await smartAccountClient.getAccountAddress();
@@ -86,17 +85,17 @@ export async function fetchBalances(
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(BASE_SEPOLIA_RPC);
+    const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
     
-    // Fetch ETH balance
+    // Fetch ETH (native gas USDC) balance
     const ethBalanceRaw = await provider.getBalance(smartAccountAddress);
     const ethBalance = parseFloat(ethers.formatEther(ethBalanceRaw)).toFixed(4);
 
-    // Fetch USDC balance (try-catch in case contract read fails)
+    // Fetch USDC balance (ERC-20 standard interface with 6 decimals)
     let usdcBalance = "0.00";
     try {
       const usdcAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-      const usdcContract = new ethers.Contract(MOCK_USDC_CONTRACT, usdcAbi, provider);
+      const usdcContract = new ethers.Contract(ARC_USDC_CONTRACT, usdcAbi, provider);
       const usdcBalanceRaw = await usdcContract.balanceOf(smartAccountAddress);
       usdcBalance = parseFloat(ethers.formatUnits(usdcBalanceRaw, 6)).toFixed(2);
     } catch {
