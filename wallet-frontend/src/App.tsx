@@ -1,31 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Wallet as WalletIcon, 
   Coins, 
   PiggyBank, 
   Settings as SettingsIcon, 
   ShoppingBag, 
-  ArrowRightLeft, 
   Copy, 
   Check, 
-  Plus, 
   RefreshCw, 
   Sliders, 
   ShieldCheck, 
   ArrowUpRight, 
   X, 
-  Info,
-  HelpCircle,
-  AlertCircle
+  Info
 } from 'lucide-react';
 import { 
   getOrCreateEOA, 
   initBiconomyAccount, 
   fetchBalances, 
   calculateRoundUp, 
-  resetEOA,
-  WalletDetails 
+  resetEOA
 } from './utils/web3';
+import type { WalletDetails } from './utils/web3';
 
 interface Transaction {
   id: string;
@@ -38,7 +34,7 @@ interface Transaction {
   txHash: string;
 }
 
-const MERCHANT_ADDRESS = "0x88ea307D53b70868a8600C6757b1f13b63D787b2";
+// const MERCHANT_ADDRESS = "0x88ea307D53b70868a8600C6757b1f13b63D787b2";
 const DEFAULT_VAULT_ADDRESS = "0x012B548bF287413d96924d55b871c261eCFA011A";
 
 export default function App() {
@@ -47,7 +43,6 @@ export default function App() {
   
   // Wallet State
   const [wallet, setWallet] = useState<WalletDetails | null>(null);
-  const [privateKey, setPrivateKey] = useState<string>('');
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
   const [balances, setBalances] = useState<{ eth: string; usdc: string }>({ eth: '0.00', usdc: '0.00' });
   const [vaultBalance, setVaultBalance] = useState<number>(() => {
@@ -139,7 +134,6 @@ export default function App() {
   // Load / Initialize Wallet on Mount
   useEffect(() => {
     const pkey = getOrCreateEOA();
-    setPrivateKey(pkey);
     loadWallet(pkey);
   }, []);
 
@@ -178,7 +172,6 @@ export default function App() {
   const handleResetWallet = async () => {
     if (window.confirm("Are you sure you want to generate a new mock EOA? Your old private key and local balances will be reset.")) {
       const newPkey = resetEOA();
-      setPrivateKey(newPkey);
       localStorage.removeItem('oink_mock_eth');
       localStorage.removeItem('oink_mock_usdc');
       setVaultBalance(24.50);
@@ -354,7 +347,7 @@ export default function App() {
       {/* Sidebar Navigation */}
       <aside className="sidebar">
         <a href="#" className="sidebar-logo" onClick={() => setActiveTab('dashboard')}>
-          <span className="piggy-icon">🐷</span>
+          <img src="/piggybank_logo.png" alt="Oink" className="sidebar-logo-img" />
           <span>Oink Protocol</span>
         </a>
         
@@ -422,7 +415,7 @@ export default function App() {
             {wallet && (
               <div className={`connection-pill ${wallet.isSimulated ? '' : 'connected'}`}>
                 <span className="connection-dot"></span>
-                <span>{wallet.isSimulated ? 'Local Mock-Account' : 'Biconomy Smart Wallet'}</span>
+                <span>{wallet.isSimulated ? 'Demo Mode' : 'Oink Smart Wallet'}</span>
               </div>
             )}
             
@@ -442,8 +435,8 @@ export default function App() {
         {loadingWallet ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '4rem 0' }}>
             <div className="spinner pink" style={{ width: '48px', height: '48px', borderWidth: '4px', marginBottom: '1.5rem' }}></div>
-            <h3>Generating Biconomy Smart Account...</h3>
-            <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Setting up ERC-4337 wallet client</p>
+            <h3>Setting up Oink Smart Wallet...</h3>
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Initializing secure transaction client</p>
           </div>
         ) : (
           <>
@@ -457,10 +450,10 @@ export default function App() {
                     <div>
                       <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.4rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <ShieldCheck color="var(--primary)" size={24} />
-                        Smart Account Wallet
+                        Oink Smart Wallet
                       </h2>
                       <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        Powered by ERC-4337 Biconomy SDK. Gas-optimized contract wallet.
+                        Secure, gas-optimized smart piggy bank wallet.
                       </p>
                     </div>
                     
@@ -901,8 +894,8 @@ export default function App() {
                         How does Oink work?
                       </div>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                        Every time you perform a transaction with your Biconomy smart account wallet, the contract calculates the spare change according to your active policy rules. 
-                        It packages both your payment and the savings transfer into a single ERC-4337 transaction batch, reducing gas overhead.
+                        Every time you perform a transaction with your Oink smart wallet, the contract calculates the spare change according to your active policy rules. 
+                        It packages both your payment and the savings transfer into a single transaction batch, reducing gas overhead.
                       </p>
                     </div>
                   </div>
@@ -952,7 +945,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.12)', padding: '0.85rem', borderRadius: 'var(--radius-md)' }}>
                 <ShieldCheck size={20} color="var(--primary)" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                  <strong>Batched UserOperation:</strong> Both actions are signed and executed in a single atomic bundle via Biconomy bundler.
+                  <strong>Batched Transaction:</strong> Both actions are signed and executed in a single secure atomic bundle.
                 </p>
               </div>
             </div>
@@ -976,7 +969,7 @@ export default function App() {
             <div className="spinner pink" style={{ margin: '0 auto 1.5rem auto', width: '48px', height: '48px', borderWidth: '4px' }}></div>
             
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-              Executing UserOperation...
+              Executing transaction bundle...
             </h3>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -1008,7 +1001,7 @@ export default function App() {
               </h3>
               
               <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.25rem 0' }}>
-                Your ERC-4337 UserOperation has been confirmed.
+                Your transaction bundle has been confirmed.
               </p>
 
               <div className="oink-receipt" style={{ width: '100%', margin: '0.5rem 0' }}>
