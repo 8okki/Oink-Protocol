@@ -541,21 +541,6 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-
-                  <div className="glass-card">
-                    <div className="balance-item">
-                      <div className="balance-header">
-                        <span>Gas Token Balance</span>
-                        <WalletIcon size={18} color="var(--primary)" />
-                      </div>
-                      <div className="balance-amount">
-                        {balances.eth} <span style={{ fontSize: '1rem', fontWeight: 500 }}>ETH</span>
-                      </div>
-                      <div className="balance-footer">
-                        Used for transaction gas fees
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Bottom Row - Policy Summary & Tx History */}
