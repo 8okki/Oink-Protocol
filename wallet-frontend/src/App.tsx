@@ -20,7 +20,9 @@ import {
   fetchBalances,
   calculateRoundUp,
   resetEOA,
-  executeOinkPayment
+  executeOinkPayment,
+  executeOinkWithdraw,
+  previewWithdrawShares
 } from './utils/web3';
 import type { WalletDetails } from './utils/web3';
 
@@ -71,6 +73,12 @@ export default function App() {
     totalAmount: number;
     txHash: string;
   } | null>(null);
+
+  // Withdraw State
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  const [withdrawStep, setWithdrawStep] = useState<'idle' | 'confirm' | 'sending' | 'success'>('idle');
+  const [withdrawSharesPreview, setWithdrawSharesPreview] = useState<string>('0.00');
+  const [activeWithdrawHash, setActiveWithdrawHash] = useState<string>('');
 
   // Transaction History State
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -356,6 +364,97 @@ export default function App() {
     setCustomAmount('');
   };
 
+  const handleWithdrawClick = async () => {
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert("Please enter a valid amount of USDC to withdraw.");
+      return;
+    }
+    
+    const available = parseFloat(balances.vaultUsdc);
+    if (amount > available) {
+      alert(`Insufficient savings in OinkVault! You can withdraw up to $${available.toFixed(2)} USDC.`);
+      return;
+    }
+
+    setWithdrawStep('confirm');
+    
+    // Preview the shares to burn
+    if (wallet && !wallet.isSimulated) {
+      const shares = await previewWithdrawShares(vaultAddress, amount);
+      setWithdrawSharesPreview(shares);
+    } else {
+      // 1:1 in simulation
+      setWithdrawSharesPreview(amount.toFixed(2));
+    }
+  };
+
+  const handleConfirmWithdraw = async () => {
+    setWithdrawStep('sending');
+    const amount = parseFloat(withdrawAmount);
+    let txHash = "";
+
+    if (wallet && !wallet.isSimulated) {
+      try {
+        txHash = await executeOinkWithdraw(
+          wallet.privateKey,
+          wallet.smartAccountAddress,
+          vaultAddress,
+          amount
+        );
+
+        // Fetch updated balances
+        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
+        setBalances(bal);
+      } catch (err: any) {
+        console.error("On-chain withdrawal failed:", err);
+        alert(`Withdrawal failed: ${err.message || err}`);
+        setWithdrawStep('idle');
+        return;
+      }
+    } else {
+      // Mock withdrawal simulation
+      await new Promise(r => setTimeout(r, 2200));
+
+      const mockVaultBalance = parseFloat(balances.vaultUsdc);
+      const mockVaultShares = parseFloat(balances.vaultShares);
+      const mockEoaUsdc = parseFloat(balances.eoaUsdc);
+
+      const newVaultUsdc = (mockVaultBalance - amount).toFixed(2);
+      const newVaultShares = (mockVaultShares - amount).toFixed(2);
+      const newEoaUsdc = (mockEoaUsdc + amount).toFixed(2);
+
+      localStorage.setItem('oink_vault_balance', newVaultUsdc);
+      localStorage.setItem('oink_vault_shares', newVaultShares);
+      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
+
+      setBalances(prev => ({
+        ...prev,
+        vaultUsdc: newVaultUsdc,
+        vaultShares: newVaultShares,
+        eoaUsdc: newEoaUsdc
+      }));
+
+      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    }
+
+    // Add withdrawal to transaction history
+    const withdrawTx: Transaction = {
+      id: `tx-w-${Date.now()}`,
+      type: 'savings',
+      title: 'Oink Vault Savings Withdrawal',
+      amount: amount,
+      roundup: 0,
+      timestamp: new Date().toISOString(),
+      status: 'success',
+      txHash: txHash
+    };
+
+    setTransactions(prev => [withdrawTx, ...prev]);
+    setActiveWithdrawHash(txHash);
+    setWithdrawStep('success');
+  };
+
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
@@ -534,8 +633,29 @@ export default function App() {
                       <div className="balance-amount highlight-pink">
                         {parseFloat(balances.vaultShares).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>ybOINK</span>
                       </div>
-                      <div className="balance-footer">
+                      <div className="balance-footer" style={{ marginBottom: '1rem' }}>
                         Equivalent to ${parseFloat(balances.vaultUsdc).toFixed(2)} USDC on-chain
+                      </div>
+                      
+                      {/* Withdraw Action */}
+                      <div style={{ display: 'flex', gap: '0.5rem', borderTop: '1px solid var(--card-border)', paddingTop: '0.75rem', marginTop: 'auto' }}>
+                        <input 
+                          type="number"
+                          step="0.01"
+                          placeholder="Withdraw USDC"
+                          className="custom-input pink"
+                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', height: '36px', width: '100%', margin: 0 }}
+                          value={withdrawAmount}
+                          onChange={(e) => setWithdrawAmount(e.target.value)}
+                        />
+                        <button 
+                          className="btn btn-pink btn-sm"
+                          style={{ height: '36px', whiteSpace: 'nowrap', padding: '0 0.85rem' }}
+                          onClick={handleWithdrawClick}
+                          disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0}
+                        >
+                          Withdraw
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1070,6 +1190,156 @@ export default function App() {
                 }}
               >
                 Go to Dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WITHDRAW CONFIRMATION MODAL */}
+      {withdrawStep === 'confirm' && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <button className="modal-close" onClick={() => setWithdrawStep('idle')}>
+              <X size={20} />
+            </button>
+
+            <div className="modal-header">
+              <div className="modal-badge-icon">🐖</div>
+              <h3>Confirm Savings Withdrawal</h3>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ textAlign: 'center', fontSize: '0.95rem', color: 'var(--text-muted)', padding: '0 0.5rem' }}>
+                Are you sure you want to withdraw <strong style={{ color: 'var(--text)' }}>${parseFloat(withdrawAmount).toFixed(2)} USDC</strong> from OinkVault?
+              </p>
+
+              <div className="oink-receipt">
+                <div className="oink-receipt-row">
+                  <span style={{ color: 'var(--text-muted)' }}>Withdraw Assets</span>
+                  <span>${parseFloat(withdrawAmount).toFixed(2)} USDC</span>
+                </div>
+
+                <div className="oink-receipt-row highlight">
+                  <span>Shares to Burn</span>
+                  <span>-{parseFloat(withdrawSharesPreview).toFixed(2)} ybOINK</span>
+                </div>
+
+                <div className="oink-receipt-row total-row">
+                  <span>Receiver Address</span>
+                  <span style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                    {wallet ? `${wallet.signerAddress.slice(0, 6)}...${wallet.signerAddress.slice(-6)}` : '0x0'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.12)', padding: '0.85rem', borderRadius: 'var(--radius-md)' }}>
+                <ShieldCheck size={20} color="var(--success)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                  <strong>Direct Refund:</strong> The withdrawn USDC will be sent directly to your EOA signer wallet, and your ybOINK vault shares will be burned.
+                </p>
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setWithdrawStep('idle')}>
+                Cancel
+              </button>
+              <button className="btn btn-pink" onClick={handleConfirmWithdraw}>
+                Confirm & Withdraw
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WITHDRAW SENDING MODAL */}
+      {withdrawStep === 'sending' && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
+            <div className="spinner pink" style={{ margin: '0 auto 1.5rem auto', width: '48px', height: '48px', borderWidth: '4px' }}></div>
+
+            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.75rem' }}>
+              Executing Vault Withdrawal...
+            </h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Executing via Smart Account</p>
+              <p>1. Preparing withdraw parameters...</p>
+              <p>2. Burning ybOINK vault shares...</p>
+              <p>3. Sending USDC to owner EOA...</p>
+              <p style={{ marginTop: '0.5rem', fontStyle: 'italic', fontSize: '0.75rem' }}>Awaiting signature & block inclusion...</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* WITHDRAW SUCCESS MODAL */}
+      {withdrawStep === 'success' && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <button className="modal-close" onClick={() => { setWithdrawStep('idle'); setWithdrawAmount(''); }}>
+              <X size={20} />
+            </button>
+
+            <div className="success-screen">
+              <div className="success-badge" style={{ background: 'var(--success-glow)', color: 'var(--success)', border: '2px solid var(--success)' }}>
+                <Check size={36} />
+              </div>
+
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.45rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.5rem' }}>
+                Withdrawal Successful!
+              </h3>
+
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.25rem 0' }}>
+                Your USDC savings have been withdrawn from OinkVault back to your EOA signer wallet.
+              </p>
+
+              <div className="oink-receipt" style={{ width: '100%', margin: '0.5rem 0' }}>
+                <div className="oink-receipt-row">
+                  <span style={{ color: 'var(--text-muted)' }}>Amount Withdrawn</span>
+                  <span>${parseFloat(withdrawAmount).toFixed(2)} USDC</span>
+                </div>
+
+                <div className="oink-receipt-row highlight">
+                  <span>ybOINK Burned</span>
+                  <span>-{parseFloat(withdrawSharesPreview).toFixed(2)} ybOINK</span>
+                </div>
+              </div>
+
+              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.4rem', borderTop: '1px solid var(--card-border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Status</span>
+                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>Success (Block Confirmed)</span>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Tx Hash</span>
+                  <span style={{ fontFamily: 'monospace' }}>
+                    {activeWithdrawHash.slice(0, 10)}...{activeWithdrawHash.slice(-10)}
+                  </span>
+                </div>
+
+                <a
+                  href={`https://explorer.testnet.arc.network/tx/${activeWithdrawHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="tx-hash-link"
+                  style={{ alignSelf: 'center' }}
+                >
+                  View on Arc Explorer <ArrowUpRight size={12} />
+                </a>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: '1.25rem' }}
+                onClick={() => {
+                  setWithdrawStep('idle');
+                  setWithdrawAmount('');
+                }}
+              >
+                Done
               </button>
             </div>
           </div>

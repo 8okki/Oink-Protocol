@@ -313,3 +313,56 @@ export async function executeOinkPayment(
 
   return receipt.hash;
 }
+
+// Execute on-chain withdrawal from OinkVault back to EOA
+export async function executeOinkWithdraw(
+  privateKey: string,
+  smartAccountAddress: string,
+  vaultAddress: string,
+  amount: number
+): Promise<string> {
+  const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
+  const signer = new ethers.Wallet(privateKey, provider);
+
+  const smartAccountAbi = [
+    "function execute(address,uint256,bytes) external payable"
+  ];
+  const smartAccountContract = new ethers.Contract(smartAccountAddress, smartAccountAbi, signer);
+
+  // We convert the USDC amount to 6 decimals
+  const assetsRaw = ethers.parseUnits(amount.toFixed(2), 6);
+
+  // Encode the withdraw(uint256 assets, address receiver, address owner) call
+  const vaultInterface = new ethers.Interface([
+    "function withdraw(uint256,address,address) returns (uint256)"
+  ]);
+  const withdrawCalldata = vaultInterface.encodeFunctionData("withdraw", [
+    assetsRaw,
+    signer.address, // receiver EOA
+    smartAccountAddress // owner of shares
+  ]);
+
+  console.log(`Withdrawing ${amount} USDC from OinkVault...`);
+  const execTx = await smartAccountContract.execute(vaultAddress, 0, withdrawCalldata);
+  const receipt = await execTx.wait();
+
+  return receipt.hash;
+}
+
+// Query on-chain vault to preview the shares to burn for a given USDC amount
+export async function previewWithdrawShares(
+  vaultAddress: string,
+  amount: number
+): Promise<string> {
+  try {
+    const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
+    const vaultAbi = ["function previewWithdraw(uint256) view returns (uint256)"];
+    const vaultContract = new ethers.Contract(vaultAddress, vaultAbi, provider);
+    const assetsRaw = ethers.parseUnits(amount.toFixed(2), 6);
+    const sharesRaw = await vaultContract.previewWithdraw(assetsRaw);
+    return parseFloat(ethers.formatUnits(sharesRaw, 6)).toFixed(2);
+  } catch (err) {
+    console.warn("Failed to preview withdraw shares from contract:", err);
+    return amount.toFixed(2); // Fallback to 1:1 peg
+  }
+}
