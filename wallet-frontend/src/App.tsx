@@ -1,25 +1,26 @@
 import { useState, useEffect } from 'react';
-import { 
-  Wallet as WalletIcon, 
-  Coins, 
-  PiggyBank, 
-  Settings as SettingsIcon, 
-  ShoppingBag, 
-  Copy, 
-  Check, 
-  RefreshCw, 
-  Sliders, 
-  ShieldCheck, 
-  ArrowUpRight, 
-  X, 
+import {
+  Wallet as WalletIcon,
+  Coins,
+  PiggyBank,
+  Settings as SettingsIcon,
+  ShoppingBag,
+  Copy,
+  Check,
+  RefreshCw,
+  Sliders,
+  ShieldCheck,
+  ArrowUpRight,
+  X,
   Info
 } from 'lucide-react';
-import { 
-  getOrCreateEOA, 
-  initBiconomyAccount, 
-  fetchBalances, 
-  calculateRoundUp, 
-  resetEOA
+import {
+  getOrCreateEOA,
+  initBiconomyAccount,
+  fetchBalances,
+  calculateRoundUp,
+  resetEOA,
+  executeOinkPayment
 } from './utils/web3';
 import type { WalletDetails } from './utils/web3';
 
@@ -34,20 +35,17 @@ interface Transaction {
   txHash: string;
 }
 
-// const MERCHANT_ADDRESS = "0x88ea307D53b70868a8600C6757b1f13b63D787b2";
-const DEFAULT_VAULT_ADDRESS = "0x012B548bF287413d96924d55b871c261eCFA011A";
+const MERCHANT_ADDRESS = "0x2191e22e44341741D741aC5adE90A23220a84275";
+const DEFAULT_VAULT_ADDRESS = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
 
 export default function App() {
   // Navigation
   const [activeTab, setActiveTab] = useState<'dashboard' | 'merchant' | 'settings'>('dashboard');
-  
+
   // Wallet State
   const [wallet, setWallet] = useState<WalletDetails | null>(null);
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
-  const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00' });
-  const [vaultBalance, setVaultBalance] = useState<number>(() => {
-    return parseFloat(localStorage.getItem('oink_vault_balance') || '24.50');
-  });
+  const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string; vaultUsdc: string; vaultShares: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00', vaultUsdc: '0.00', vaultShares: '0.00' });
   const [copiedText, setCopiedText] = useState<string>('');
   const [isRefreshingBalances, setIsRefreshingBalances] = useState<boolean>(false);
 
@@ -148,10 +146,6 @@ export default function App() {
   }, [vaultAddress]);
 
   useEffect(() => {
-    localStorage.setItem('oink_vault_balance', String(vaultBalance));
-  }, [vaultBalance]);
-
-  useEffect(() => {
     localStorage.setItem('oink_transactions', JSON.stringify(transactions));
   }, [transactions]);
 
@@ -159,7 +153,7 @@ export default function App() {
     setLoadingWallet(true);
     const details = await initBiconomyAccount(pkey);
     setWallet(details);
-    
+
     // Fetch balances
     const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated);
     setBalances(bal);
@@ -171,7 +165,9 @@ export default function App() {
       const newPkey = resetEOA();
       localStorage.removeItem('oink_mock_eth');
       localStorage.removeItem('oink_mock_usdc');
-      setVaultBalance(24.50);
+      localStorage.setItem('oink_vault_balance', '24.50');
+      localStorage.setItem('oink_vault_shares', '24.50');
+      setBalances(prev => ({ ...prev, vaultUsdc: '24.50', vaultShares: '24.50' }));
       await loadWallet(newPkey);
     }
   };
@@ -184,7 +180,9 @@ export default function App() {
         localStorage.setItem("oink_eoa_private_key", cleanKey);
         localStorage.removeItem('oink_mock_eth');
         localStorage.removeItem('oink_mock_usdc');
-        setVaultBalance(0.00); // Reset local mock vault balance to query actuals if needed
+        localStorage.setItem('oink_vault_balance', '0.00');
+        localStorage.setItem('oink_vault_shares', '0.00');
+        setBalances(prev => ({ ...prev, vaultUsdc: '0.00', vaultShares: '0.00' }));
         await loadWallet(cleanKey);
       } else {
         alert("Invalid private key format! It must be a 64-character hex string starting with 0x.");
@@ -217,7 +215,7 @@ export default function App() {
   const getCheckoutDetails = () => {
     let price = 0;
     let name = "Custom Checkout";
-    
+
     if (selectedItem) {
       price = selectedItem.price;
       name = selectedItem.name;
@@ -240,46 +238,81 @@ export default function App() {
   const handlePayClick = () => {
     if (checkoutPrice <= 0) return;
     
-    // Check if user has enough USDC
-    const userUsdc = parseFloat(balances.usdc);
-    if (userUsdc < checkoutTotal) {
-      alert(`Insufficient USDC balance! You have $${userUsdc.toFixed(2)} but this transaction requires $${checkoutTotal.toFixed(2)}. Click 'Refill Faucet' on the Dashboard tab.`);
+    // Check if user has enough USDC in their owner EOA signer wallet
+    const userUsdc = parseFloat(balances.eoaUsdc);
+    const requiredTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
+    
+    if (userUsdc < requiredTotal) {
+      alert(`Insufficient USDC balance! You have $${userUsdc.toFixed(2)} but this transaction requires $${requiredTotal.toFixed(2)}.`);
       return;
     }
 
-    if (oinkPolicyEnabled && checkoutRoundup > 0) {
-      setCheckoutStep('confirm');
-    } else {
-      // Execute directly if no round-up or policy disabled
-      executeMockTransaction(checkoutPrice, 0, checkoutPrice);
-    }
+    setCheckoutStep('confirm');
   };
 
   const handleConfirmOink = () => {
     setCheckoutStep('sending');
-    executeMockTransaction(checkoutPrice, checkoutRoundup, checkoutTotal);
+    const finalRoundup = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutRoundup : 0;
+    const finalTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
+    executeMockTransaction(checkoutPrice, finalRoundup, finalTotal);
   };
 
   const executeMockTransaction = async (price: number, roundup: number, total: number) => {
-    // Simulate smart account txn signature & execution delay
-    await new Promise(r => setTimeout(r, 2200));
+    let txHash = "";
 
-    // Deduct USDC balance
-    const currentUsdc = parseFloat(balances.usdc);
-    const newUsdc = (currentUsdc - total).toFixed(2);
-    localStorage.setItem('oink_mock_usdc', newUsdc);
+    if (wallet && !wallet.isSimulated) {
+      try {
+        // Run real transaction on-chain via EOA -> Smart Account -> Merchant + Vault
+        txHash = await executeOinkPayment(
+          wallet.privateKey,
+          wallet.smartAccountAddress,
+          MERCHANT_ADDRESS,
+          price,
+          roundup,
+          vaultAddress
+        );
 
-    // If Oink is enabled, add to vault
-    if (oinkPolicyEnabled && roundup > 0) {
-      const newVault = vaultBalance + roundup;
-      setVaultBalance(newVault);
-      localStorage.setItem('oink_vault_balance', newVault.toFixed(2));
+        // Refresh actual balances from blockchain
+        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
+        setBalances(bal);
+      } catch (err: any) {
+        console.error("On-chain transaction execution failed:", err);
+        alert(`Transaction failed: ${err.message || err}`);
+        setCheckoutStep('idle');
+        return;
+      }
+    } else {
+      // Simulate smart account txn signature & execution delay
+      await new Promise(r => setTimeout(r, 2200));
+
+      // Deduct USDC balance from owner EOA
+      const currentEoaUsdc = parseFloat(balances.eoaUsdc);
+      const newEoaUsdc = (currentEoaUsdc - total).toFixed(2);
+      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
+
+      // If Oink is enabled, add to vault
+      let newVaultUsdc = balances.vaultUsdc;
+      let newVaultShares = balances.vaultShares;
+      if (oinkPolicyEnabled && roundup > 0) {
+        const newVault = parseFloat(balances.vaultUsdc) + roundup;
+        newVaultUsdc = newVault.toFixed(2);
+        localStorage.setItem('oink_vault_balance', newVaultUsdc);
+
+        const newShares = parseFloat(balances.vaultShares) + roundup;
+        newVaultShares = newShares.toFixed(2);
+        localStorage.setItem('oink_vault_shares', newVaultShares);
+      }
+
+      // Update state balance
+      setBalances(prev => ({
+        ...prev,
+        eoaUsdc: newEoaUsdc,
+        vaultUsdc: newVaultUsdc,
+        vaultShares: newVaultShares
+      }));
+
+      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     }
-
-    // Update state balance
-    setBalances(prev => ({ ...prev, usdc: newUsdc }));
-
-    const txHash = '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
 
     // Add transactions to history
     const mainTx: Transaction = {
@@ -331,25 +364,25 @@ export default function App() {
           <img src="/piggybank_logo.png" alt="Oink" className="sidebar-logo-img" />
           <span>Oink Protocol</span>
         </a>
-        
+
         <nav className="nav-links">
-          <div 
+          <div
             className={`nav-link ${activeTab === 'dashboard' ? 'active' : ''}`}
             onClick={() => setActiveTab('dashboard')}
           >
             <WalletIcon size={20} />
             <span>Smart Dashboard</span>
           </div>
-          
-          <div 
+
+          <div
             className={`nav-link ${activeTab === 'merchant' ? 'active' : ''}`}
             onClick={() => setActiveTab('merchant')}
           >
             <ShoppingBag size={20} />
             <span>Mock Merchant</span>
           </div>
-          
-          <div 
+
+          <div
             className={`nav-link ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => setActiveTab('settings')}
           >
@@ -357,7 +390,7 @@ export default function App() {
             <span>Oink Settings</span>
           </div>
         </nav>
-        
+
         <div className="sidebar-footer">
           <div className="connection-pill connected">
             <span className="connection-dot"></span>
@@ -368,7 +401,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="main-content">
-        
+
         {/* Header */}
         <header className="header">
           <div className="header-title">
@@ -391,7 +424,7 @@ export default function App() {
               </>
             )}
           </div>
-          
+
           <div className="header-actions">
             {wallet && (
               <div className={`connection-pill ${wallet.isSimulated ? '' : 'connected'}`}>
@@ -399,9 +432,9 @@ export default function App() {
                 <span>{wallet.isSimulated ? 'Demo Mode' : 'Oink Smart Wallet'}</span>
               </div>
             )}
-            
-            <button 
-              className="btn btn-secondary btn-sm" 
+
+            <button
+              className="btn btn-secondary btn-sm"
               onClick={handleRefreshBalances}
               disabled={isRefreshingBalances || loadingWallet}
               title="Refresh balances from blockchain"
@@ -424,7 +457,7 @@ export default function App() {
             {/* TAB: DASHBOARD */}
             {activeTab === 'dashboard' && (
               <div className="tab-content">
-                
+
                 {/* Account Details Card */}
                 <div className="glass-card glow-primary wallet-conn-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem', marginBottom: '1.5rem' }}>
@@ -437,7 +470,7 @@ export default function App() {
                         Secure, gas-optimized smart piggy bank wallet.
                       </p>
                     </div>
-                    
+
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
                       <button className="btn btn-secondary btn-sm" onClick={handleImportPrivateKey}>
                         Import Key
@@ -459,7 +492,7 @@ export default function App() {
                           </button>
                         </div>
                       </div>
-                      
+
                       <div className="detail-row">
                         <span className="detail-label">EOA Signer Address (Owner)</span>
                         <div className="detail-value">
@@ -478,7 +511,7 @@ export default function App() {
                           Arc Testnet (Chain 5042002)
                         </span>
                       </div>
-                      
+
                       <div className="detail-row">
                         <span className="detail-label">Deployment Status</span>
                         <span className="status-indicator success">
@@ -499,25 +532,10 @@ export default function App() {
                         <PiggyBank size={18} color="var(--secondary)" />
                       </div>
                       <div className="balance-amount highlight-pink">
-                        ${vaultBalance.toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>USDC</span>
+                        {parseFloat(balances.vaultShares).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>ybOINK</span>
                       </div>
                       <div className="balance-footer">
-                        Rerouted from round-up transactions
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="glass-card">
-                    <div className="balance-item">
-                      <div className="balance-header">
-                        <span>Smart Wallet USDC</span>
-                        <Coins size={18} color="#db2777" />
-                      </div>
-                      <div className="balance-amount">
-                        ${parseFloat(balances.usdc).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>USDC</span>
-                      </div>
-                      <div className="balance-footer">
-                        Funds held in Oink Smart Account contract
+                        Equivalent to ${parseFloat(balances.vaultUsdc).toFixed(2)} USDC on-chain
                       </div>
                     </div>
                   </div>
@@ -540,11 +558,11 @@ export default function App() {
 
                 {/* Bottom Row - Policy Summary & Tx History */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '1.5rem', flexWrap: 'wrap' }}>
-                  
+
                   {/* Left: Policy Status */}
                   <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                     <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Oink Round-Up Status</h3>
-                    
+
                     <div className="switch-control" style={{ background: 'rgba(255,255,255,0.01)' }}>
                       <div className="switch-label">
                         <span className="switch-title">Auto-Savings Policy</span>
@@ -553,9 +571,9 @@ export default function App() {
                         </span>
                       </div>
                       <label className="switch">
-                        <input 
-                          type="checkbox" 
-                          checked={oinkPolicyEnabled} 
+                        <input
+                          type="checkbox"
+                          checked={oinkPolicyEnabled}
                           onChange={(e) => setOinkPolicyEnabled(e.target.checked)}
                         />
                         <span className="slider pink"></span>
@@ -565,7 +583,7 @@ export default function App() {
                     <div style={{ padding: '1rem', background: 'rgba(0,0,0,0.15)', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)' }}>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>ACTIVE POLICY TYPE</div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 700, fontSize: '1.1rem', color: '#fff', textTransform: 'capitalize' }}>
+                        <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)', textTransform: 'capitalize' }}>
                           {oinkPolicy.replace('-', ' ')}
                         </span>
                         <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('settings')}>
@@ -640,7 +658,7 @@ export default function App() {
             {activeTab === 'merchant' && (
               <div className="tab-content">
                 <div className="glass-card merchant-layout">
-                  
+
                   {/* Storefront Selection */}
                   <div>
                     <div className="merchant-header">
@@ -651,12 +669,12 @@ export default function App() {
                       </div>
                     </div>
 
-                    <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '1rem', color: '#fff' }}>Select an Item to Purchase</h3>
-                    
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '1rem', color: 'var(--text)' }}>Select an Item to Purchase</h3>
+
                     <div className="store-grid">
                       {storeItems.map((item) => (
-                        <div 
-                          key={item.id} 
+                        <div
+                          key={item.id}
                           className={`store-item ${selectedItem?.id === item.id ? 'selected' : ''}`}
                           onClick={() => {
                             setSelectedItem(item);
@@ -682,7 +700,7 @@ export default function App() {
 
                       <div style={{ position: 'relative' }}>
                         <span style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', fontWeight: 700, color: 'var(--text-muted)' }}>$</span>
-                        <input 
+                        <input
                           type="number"
                           step="0.01"
                           placeholder="Enter custom USDC amount"
@@ -700,10 +718,10 @@ export default function App() {
 
                   {/* Summary & Checkout Actions */}
                   <div className="checkout-summary" style={{ background: 'rgba(0, 0, 0, 0.15)', padding: '1.5rem', borderRadius: 'var(--radius-lg)', border: '1px solid var(--card-border)' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'white' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
                       Order Summary
                     </h3>
-                    
+
                     <div style={{ flex: 1 }}>
                       {checkoutPrice > 0 ? (
                         <>
@@ -723,7 +741,7 @@ export default function App() {
                                 </span>
                                 <span style={{ fontWeight: 600 }}>+${checkoutRoundup.toFixed(2)} USDC</span>
                               </div>
-                              
+
                               <div className="roundup-preview-alert">
                                 <PiggyBank className="icon" size={16} />
                                 <div className="roundup-preview-text">
@@ -750,7 +768,7 @@ export default function App() {
                       )}
                     </div>
 
-                    <button 
+                    <button
                       className="btn btn-pink btn-block"
                       style={{ marginTop: 'auto' }}
                       disabled={checkoutPrice <= 0}
@@ -769,10 +787,10 @@ export default function App() {
             {activeTab === 'settings' && (
               <div className="tab-content">
                 <div className="glass-card settings-grid">
-                  
+
                   {/* Left Column: Switch & Presets */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'white' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
                       Oink Round-Up Rules
                     </h3>
 
@@ -783,9 +801,9 @@ export default function App() {
                         <span className="switch-desc">Collect spare change from all USDC transaction payments</span>
                       </div>
                       <label className="switch">
-                        <input 
-                          type="checkbox" 
-                          checked={oinkPolicyEnabled} 
+                        <input
+                          type="checkbox"
+                          checked={oinkPolicyEnabled}
                           onChange={(e) => setOinkPolicyEnabled(e.target.checked)}
                         />
                         <span className="slider pink"></span>
@@ -799,21 +817,21 @@ export default function App() {
                         Select Round-Up Policy
                       </label>
                       <div className="policy-options">
-                        <div 
+                        <div
                           className={`policy-card ${oinkPolicy === 'nearest-1' ? 'selected pink' : ''}`}
                           onClick={() => setOinkPolicy('nearest-1')}
                         >
                           <span className="policy-card-title">Nearest $1</span>
                           <span className="policy-card-desc">Standard (Default)</span>
                         </div>
-                        <div 
+                        <div
                           className={`policy-card ${oinkPolicy === 'nearest-5' ? 'selected pink' : ''}`}
                           onClick={() => setOinkPolicy('nearest-5')}
                         >
                           <span className="policy-card-title">Nearest $5</span>
                           <span className="policy-card-desc">Accelerate savings</span>
                         </div>
-                        <div 
+                        <div
                           className={`policy-card ${oinkPolicy === 'nearest-10' ? 'selected pink' : ''}`}
                           onClick={() => setOinkPolicy('nearest-10')}
                         >
@@ -827,14 +845,14 @@ export default function App() {
                     <div className="form-group" style={{ opacity: oinkPolicyEnabled ? 1 : 0.5, pointerEvents: oinkPolicyEnabled ? 'auto' : 'none', transition: 'opacity 0.2s' }}>
                       <label>Fixed Sparings Policy</label>
                       <div className="policy-options">
-                        <div 
+                        <div
                           className={`policy-card ${oinkPolicy === 'fixed-0.5' ? 'selected pink' : ''}`}
                           onClick={() => setOinkPolicy('fixed-0.5')}
                         >
                           <span className="policy-card-title">+$0.50</span>
                           <span className="policy-card-desc">Add flat $0.50</span>
                         </div>
-                        <div 
+                        <div
                           className={`policy-card ${oinkPolicy === 'fixed-1' ? 'selected pink' : ''}`}
                           onClick={() => setOinkPolicy('fixed-1')}
                         >
@@ -847,7 +865,7 @@ export default function App() {
 
                   {/* Right Column: Dest Vault Config */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'white' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
                       Routing & Destination
                     </h3>
 
@@ -856,10 +874,10 @@ export default function App() {
                         <span>Target Savings Vault (OinkVault)</span>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-dark)' }}>Verified Contract</span>
                       </label>
-                      <input 
-                        type="text" 
-                        className="custom-input" 
-                        value={vaultAddress} 
+                      <input
+                        type="text"
+                        className="custom-input"
+                        value={vaultAddress}
                         onChange={(e) => setVaultAddress(e.target.value)}
                         placeholder="0x..."
                       />
@@ -874,7 +892,7 @@ export default function App() {
                         How does Oink work?
                       </div>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                        Every time you perform a transaction with your Oink smart wallet, the contract calculates the spare change according to your active policy rules. 
+                        Every time you perform a transaction with your Oink smart wallet, the contract calculates the spare change according to your active policy rules.
                         It packages both your payment and the savings transfer into a single transaction batch, reducing gas overhead.
                       </p>
                     </div>
@@ -894,15 +912,23 @@ export default function App() {
             <button className="modal-close" onClick={() => setCheckoutStep('idle')}>
               <X size={20} />
             </button>
-            
+
             <div className="modal-header">
-              <div className="modal-badge-icon">🐖</div>
-              <h3>Confirm transaction with Oink Round-up</h3>
+              <div className="modal-badge-icon">{oinkPolicyEnabled && checkoutRoundup > 0 ? "🐖" : "💳"}</div>
+              <h3>{oinkPolicyEnabled && checkoutRoundup > 0 ? "Confirm Transaction with Oink" : "Confirm Transaction"}</h3>
             </div>
 
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <p style={{ textAlign: 'center', fontSize: '0.95rem', color: 'var(--text-muted)', padding: '0 0.5rem' }}>
-                Confirm transaction of <strong style={{ color: 'white' }}>${checkoutPrice.toFixed(2)} USDC</strong> with an Oink round-up of <strong style={{ color: 'var(--secondary)' }}>${checkoutRoundup.toFixed(2)} USDC</strong>?
+                {oinkPolicyEnabled && checkoutRoundup > 0 ? (
+                  <>
+                    Confirm transaction of <strong style={{ color: 'var(--text)' }}>${checkoutPrice.toFixed(2)} USDC</strong> with an Oink round-up of <strong style={{ color: 'var(--secondary)' }}>${checkoutRoundup.toFixed(2)} USDC</strong>?
+                  </>
+                ) : (
+                  <>
+                    Confirm transaction of <strong style={{ color: 'var(--text)' }}>${checkoutPrice.toFixed(2)} USDC</strong> (Oink round-up is disabled)?
+                  </>
+                )}
               </p>
 
               <div className="oink-receipt">
@@ -910,22 +936,30 @@ export default function App() {
                   <span style={{ color: 'var(--text-muted)' }}>Purchase Amount</span>
                   <span>${checkoutPrice.toFixed(2)} USDC</span>
                 </div>
-                
-                <div className="oink-receipt-row highlight">
-                  <span>Oink Round-Up</span>
-                  <span>+${checkoutRoundup.toFixed(2)} USDC</span>
+
+                <div className="oink-receipt-row highlight" style={{ opacity: oinkPolicyEnabled && checkoutRoundup > 0 ? 1 : 0.5 }}>
+                  <span>Oink Round-Up {!(oinkPolicyEnabled && checkoutRoundup > 0) && "(Disabled)"}</span>
+                  <span>{oinkPolicyEnabled && checkoutRoundup > 0 ? `+$${checkoutRoundup.toFixed(2)}` : "$0.00"} USDC</span>
                 </div>
 
                 <div className="oink-receipt-row total-row">
                   <span>Total Debit</span>
-                  <span>${checkoutTotal.toFixed(2)} USDC</span>
+                  <span>${(oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice).toFixed(2)} USDC</span>
                 </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.12)', padding: '0.85rem', borderRadius: 'var(--radius-md)' }}>
                 <ShieldCheck size={20} color="var(--primary)" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                  <strong>Batched Transaction:</strong> Both actions are signed and executed in a single secure atomic bundle.
+                  {oinkPolicyEnabled && checkoutRoundup > 0 ? (
+                    <>
+                      <strong>Batched Transaction:</strong> Both the merchant payment and your spare-change round-up split are executed in a single atomic transaction bundle.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Smart Account Execution:</strong> Your merchant payment will be executed directly via your secure smart account contract with no round-up savings split.
+                    </>
+                  )}
                 </p>
               </div>
             </div>
@@ -947,13 +981,13 @@ export default function App() {
         <div className="modal-overlay">
           <div className="modal-card" style={{ textAlign: 'center', padding: '3rem 2rem' }}>
             <div className="spinner pink" style={{ margin: '0 auto 1.5rem auto', width: '48px', height: '48px', borderWidth: '4px' }}></div>
-            
+
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.75rem' }}>
               Executing transaction bundle...
             </h3>
-            
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              <p style={{ color: '#fff', fontWeight: 500 }}>Batching transactions together</p>
+              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Batching transactions together</p>
               <p>1. Approving USDC spending...</p>
               <p>2. Initiating transfer to Merchant...</p>
               <p>3. Rerouting spare-change to OinkVault...</p>
@@ -970,16 +1004,16 @@ export default function App() {
             <button className="modal-close" onClick={() => setCheckoutStep('idle')}>
               <X size={20} />
             </button>
-            
+
             <div className="success-screen">
               <div className="success-badge">
                 <Check size={36} />
               </div>
-              
-              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.45rem', fontWeight: 700, color: 'white', marginTop: '0.5rem' }}>
+
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.45rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.5rem' }}>
                 Payment Successful!
               </h3>
-              
+
               <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.25rem 0' }}>
                 Your transaction bundle has been confirmed.
               </p>
@@ -989,7 +1023,7 @@ export default function App() {
                   <span style={{ color: 'var(--text-muted)' }}>Merchant Payment</span>
                   <span>${activeTxResult.merchantAmount.toFixed(2)} USDC</span>
                 </div>
-                
+
                 {activeTxResult.roundupAmount > 0 && (
                   <div className="oink-receipt-row highlight">
                     <span>Oink Vault Rerouted</span>
@@ -1008,27 +1042,27 @@ export default function App() {
                   <span style={{ color: 'var(--text-muted)' }}>Status</span>
                   <span style={{ color: 'var(--success)', fontWeight: 600 }}>Success (Block Confirmed)</span>
                 </div>
-                
+
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Tx Hash</span>
                   <span style={{ fontFamily: 'monospace' }}>
                     {activeTxResult.txHash.slice(0, 10)}...{activeTxResult.txHash.slice(-10)}
                   </span>
                 </div>
-                
-                <a 
-                  href={`https://sepolia.basescan.org/tx/${activeTxResult.txHash}`} 
-                  target="_blank" 
+
+                <a
+                  href={`https://explorer.testnet.arc.network/tx/${activeTxResult.txHash}`}
+                  target="_blank"
                   rel="noreferrer"
                   className="tx-hash-link"
                   style={{ alignSelf: 'center' }}
                 >
-                  View on Basescan <ArrowUpRight size={12} />
+                  View on Arc Explorer <ArrowUpRight size={12} />
                 </a>
               </div>
 
-              <button 
-                className="btn btn-primary" 
+              <button
+                className="btn btn-primary"
                 style={{ width: '100%', marginTop: '1.25rem' }}
                 onClick={() => {
                   setCheckoutStep('idle');
