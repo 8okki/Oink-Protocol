@@ -2,14 +2,14 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/OinkSmartAccount.sol";
-import "../src/MockERC20.sol";
-import "../src/MockOinkVault.sol";
+import {OinkSmartAccount} from "../src/OinkSmartAccount.sol";
+import {MockERC20} from "./Mocks.sol";
+import {OinkVault} from "../src/OinkVault.sol";
 
 contract OinkSmartAccountTest is Test {
     OinkSmartAccount public account;
     MockERC20 public usdc;
-    MockOinkVault public vault;
+    OinkVault public vault;
     
     address public owner = address(0x1);
     address public entryPoint = address(0x2);
@@ -22,8 +22,8 @@ contract OinkSmartAccountTest is Test {
         // Deploy Mock USDC with 6 decimals
         usdc = new MockERC20("USD Coin", "USDC", 6);
         
-        // Deploy Mock OinkVault
-        vault = new MockOinkVault(address(usdc), "Oink Vault Token", "oUSDC");
+        // Deploy OinkVault
+        vault = new OinkVault(usdc, owner);
         
         // Deploy OinkSmartAccount
         account = new OinkSmartAccount(owner, entryPoint, address(usdc));

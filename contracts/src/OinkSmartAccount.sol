@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.13;
+pragma solidity ^0.8.20;
 
-interface IERC20 {
-    function transfer(address to, uint256 value) external returns (bool);
-    function approve(address spender, uint256 value) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-}
-
-interface IERC20Metadata {
-    function decimals() external view returns (uint8);
-}
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 interface IOinkVault {
     function deposit(uint256 assets, address receiver) external returns (uint256);
