@@ -18,32 +18,12 @@ const arcTestnet = defineChain({
   },
 });
 
-// Aave V4 Pool ABI for getReserveData
-const aavePoolAbi = [
+// Spoke ABI for MockAaveV4Spoke
+const spokeAbi = [
   {
-    "inputs": [{ "internalType": "address", "name": "asset", "type": "address" }],
-    "name": "getReserveData",
-    "outputs": [
-      {
-        "components": [
-          { "internalType": "uint256", "name": "configuration", "type": "uint256" },
-          { "internalType": "uint128", "name": "liquidityIndex", "type": "uint128" },
-          { "internalType": "uint128", "name": "currentLiquidityRate", "type": "uint128" },
-          { "internalType": "uint128", "name": "variableBorrowIndex", "type": "uint128" },
-          { "internalType": "uint128", "name": "currentVariableBorrowRate", "type": "uint128" },
-          { "internalType": "uint128", "name": "currentStableBorrowRate", "type": "uint128" },
-          { "internalType": "uint40", "name": "lastUpdateTimestamp", "type": "uint40" },
-          { "internalType": "uint16", "name": "id", "type": "uint16" },
-          { "internalType": "address", "name": "aTokenAddress", "type": "address" },
-          { "internalType": "address", "name": "stableDebtTokenAddress", "type": "address" },
-          { "internalType": "address", "name": "variableDebtTokenAddress", "type": "address" },
-          { "internalType": "address", "name": "interestRateStrategyAddress", "type": "address" }
-        ],
-        "internalType": "struct DataTypes.ReserveData",
-        "name": "",
-        "type": "tuple"
-      }
-    ],
+    "inputs": [],
+    "name": "supplyAPY",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
     "stateMutability": "view",
     "type": "function"
   }
@@ -60,6 +40,39 @@ const oinkVaultAbi = [
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "name": "activeProtocols",
+    "outputs": [
+      { "internalType": "address", "name": "", "type": "address" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "address", "name": "", "type": "address" }
+    ],
+    "name": "protocolReceiptToken",
+    "outputs": [
+      { "internalType": "address", "name": "", "type": "address" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+] as const;
+
+// Mini ABI for standard ERC20
+const erc20Abi = [
+  {
+    "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
   }
 ] as const;
 
@@ -71,8 +84,11 @@ const ALLOCATOR_PK = process.env.ALLOCATOR_PRIVATE_KEY as `0x${string}`;
 const OINK_VAULT_ADDRESS = (process.env.OINK_VAULT_ADDRESS || '0x18A49aEF7e31ea27E727025185F12FF0633cd6Db') as `0x${string}`;
 const USDC_ADDRESS = (process.env.USDC_ADDRESS || '0x3600000000000000000000000000000000000000') as `0x${string}`;
 
-const AAVE_POOL_SOURCE = process.env.AAVE_POOL_SOURCE || '0x0000000000000000000000000000000000000000';
-const AAVE_POOL_DEST = process.env.AAVE_POOL_DESTINATION || '0x0000000000000000000000000000000000000000';
+// Parse candidate pools array
+const CANDIDATE_POOLS = (process.env.CANDIDATE_POOLS || '')
+  .split(',')
+  .map(p => p.trim())
+  .filter(p => p !== '');
 
 const NET_PROFIT_THRESHOLD = parseFloat(process.env.NET_PROFIT_THRESHOLD || '5.0');
 const PROJECTED_DAYS = parseInt(process.env.PROJECTED_DAYS || '30', 10);
@@ -103,42 +119,154 @@ const sourceWalletClient = account
 // AI Agent On-Chain & Calculation Tool Implementations
 // =============================================================================
 
-async function toolFetchYields() {
-  console.log(`[Tool Call] Fetching yield rates...`);
-  
-  let sourceYield = 0.032; // Default mock yields
-  let destYield = 0.057;   // Default mock yields
-  let isMock = true;
+/**
+ * Tool: Fetch yields for a list of candidate pools.
+ * If live calls fail or are mock addresses, returns simulation fallbacks.
+ */
+async function toolFetchYields(poolAddresses: string[]) {
+  console.log(`[Tool Call] Fetching yield rates for pools:`, poolAddresses);
+  const results: { poolAddress: string; yieldPercent: number; isMock: boolean }[] = [];
 
-  if (AAVE_POOL_SOURCE && AAVE_POOL_SOURCE !== '0x0000000000000000000000000000000000000000') {
+  for (let i = 0; i < poolAddresses.length; i++) {
+    const pool = poolAddresses[i];
+    if (!pool || pool === '0x0000000000000000000000000000000000000000') {
+      continue;
+    }
+
     try {
-      const data = await sourcePublicClient.readContract({
-        address: AAVE_POOL_SOURCE as `0x${string}`,
-        abi: aavePoolAbi,
-        functionName: 'getReserveData',
-        args: [USDC_ADDRESS as `0x${string}`],
+      const supplyApyBps = await sourcePublicClient.readContract({
+        address: pool as `0x${string}`,
+        abi: spokeAbi,
+        functionName: 'supplyAPY',
       });
-      sourceYield = Number(data.currentLiquidityRate) / Number(RAY);
-      isMock = false;
-    } catch {}
-  }
-
-  if (AAVE_POOL_DEST && AAVE_POOL_DEST !== '0x0000000000000000000000000000000000000000') {
-    try {
-      const data = await destPublicClient.readContract({
-        address: AAVE_POOL_DEST as `0x${string}`,
-        abi: aavePoolAbi,
-        functionName: 'getReserveData',
-        args: [USDC_ADDRESS as `0x${string}`],
+      const yieldPercent = Number(supplyApyBps) / 10000;
+      results.push({
+        poolAddress: pool,
+        yieldPercent,
+        isMock: false,
       });
-      destYield = Number(data.currentLiquidityRate) / Number(RAY);
-      isMock = false;
-    } catch {}
+      console.log(`  Pool ${pool} yield: ${(yieldPercent * 100).toFixed(2)}% (from chain)`);
+    } catch (err: any) {
+      console.error(`  Failed to query yield from spoke ${pool}:`, err.message || err);
+      // Fallback if network call fails
+      const mockRates = [0.032, 0.045, 0.058];
+      results.push({
+        poolAddress: pool,
+        yieldPercent: mockRates[i % mockRates.length],
+        isMock: true,
+      });
+    }
   }
-
-  return { sourceYield, destYield, isMock };
+  return { yields: results };
 }
 
+/**
+ * Tool: Query vault state to find active deposits and idle USDC.
+ */
+async function toolGetCurrentVaultAllocation() {
+  console.log(`[Tool Call] Querying OinkVault state dynamically...`);
+  const activeProtocols: string[] = [];
+  let index = 0;
+
+  // 1. Scan for active protocols
+  while (true) {
+    try {
+      const protocol = await sourcePublicClient.readContract({
+        address: OINK_VAULT_ADDRESS,
+        abi: oinkVaultAbi,
+        functionName: 'activeProtocols',
+        args: [BigInt(index)],
+      });
+      activeProtocols.push(protocol);
+      index++;
+    } catch {
+      break; // Index out of bounds, finish loop
+    }
+  }
+
+  const allocations: { pool: string; balanceUsdc: number; isMock: boolean }[] = [];
+
+  // 2. Fetch balances for active protocols
+  for (const pool of activeProtocols) {
+    try {
+      const receiptToken = await sourcePublicClient.readContract({
+        address: OINK_VAULT_ADDRESS,
+        abi: oinkVaultAbi,
+        functionName: 'protocolReceiptToken',
+        args: [pool as `0x${string}`],
+      });
+
+      const shareBalance = await sourcePublicClient.readContract({
+        address: receiptToken as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [OINK_VAULT_ADDRESS],
+      });
+
+      let usdcValue = shareBalance;
+      // Optional ERC-4626 convertToAssets lookup
+      try {
+        usdcValue = await sourcePublicClient.readContract({
+          address: pool as `0x${string}`,
+          abi: [
+            {
+              "inputs": [{ "internalType": "uint256", "name": "shares", "type": "uint256" }],
+              "name": "convertToAssets",
+              "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+              "stateMutability": "view",
+              "type": "function"
+            }
+          ],
+          functionName: 'convertToAssets',
+          args: [shareBalance],
+        });
+      } catch {}
+
+      allocations.push({
+        pool,
+        balanceUsdc: Number(formatUnits(usdcValue, USD_DECIMALS)),
+        isMock: false,
+      });
+    } catch {
+      // Fallback mock allocation for demo if reads fail
+      allocations.push({
+        pool,
+        balanceUsdc: PRINCIPAL_AMOUNT,
+        isMock: true,
+      });
+    }
+  }
+
+  // If no allocations were returned (contract returned empty), provide a mock active allocation
+  // so the agent always has a "Source" to optimize from during the hackathon
+  if (allocations.length === 0) {
+    allocations.push({
+      pool: '0x1111111111111111111111111111111111111111',
+      balanceUsdc: PRINCIPAL_AMOUNT,
+      isMock: true,
+    });
+  }
+
+  // 3. Query idle USDC balance
+  let idleUsdc = 0;
+  try {
+    const idleRaw = await sourcePublicClient.readContract({
+      address: USDC_ADDRESS as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [OINK_VAULT_ADDRESS],
+    });
+    idleUsdc = Number(formatUnits(idleRaw, USD_DECIMALS));
+  } catch {
+    idleUsdc = 250.00; // Mock idle USDC
+  }
+
+  return { idleUsdc, allocations };
+}
+
+/**
+ * Tool: Estimate gas/bridge costs.
+ */
 async function toolEstimateCosts() {
   console.log(`[Tool Call] Estimating transaction costs...`);
   try {
@@ -151,49 +279,135 @@ async function toolEstimateCosts() {
   }
 }
 
-function toolCalculateNetProfit(
-  sourceYield: number,
-  destYield: number,
-  principal: number,
-  projectedDays: number,
-  estimatedCost: number
-) {
-  console.log(`[Tool Call] Running Net Profit calculation...`);
-  const yieldDelta = destYield - sourceYield;
-  const grossProfit = principal * yieldDelta * (projectedDays / 365);
-  const netProfit = grossProfit - estimatedCost;
-  return { grossProfit, netProfit, yieldDelta };
-}
-
-async function toolExecuteRebalance(amount: number) {
-  console.log(`[Tool Call] Executing on-chain rebalance via OinkVault...`);
+/**
+ * Tool: Submit the OinkVault investment transaction.
+ */
+async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
+  console.log(`[Tool Call] Executing on-chain rebalance to target: ${targetPoolAddress}...`);
   if (!account || !sourceWalletClient) {
     throw new Error("Allocator account is not initialized.");
   }
 
-  const rebalanceAmount = parseUnits(amount.toString(), USD_DECIMALS);
-  const targetPoolAddress = AAVE_POOL_DEST === '0x0000000000000000000000000000000000000000'
-    ? '0x2222222222222222222222222222222222222222'
-    : AAVE_POOL_DEST;
-
   try {
+    // 1. Scan for active protocols to withdraw from first
+    const activeProtocols: string[] = [];
+    let index = 0;
+    while (true) {
+      try {
+        const protocol = await sourcePublicClient.readContract({
+          address: OINK_VAULT_ADDRESS,
+          abi: oinkVaultAbi,
+          functionName: 'activeProtocols',
+          args: [BigInt(index)],
+        });
+        activeProtocols.push(protocol.toLowerCase());
+        index++;
+      } catch {
+        break; // Out of bounds
+      }
+    }
+
+    const targetLower = targetPoolAddress.toLowerCase();
+
+    // 2. Withdraw from any active protocol that is NOT the target pool
+    for (const pool of activeProtocols) {
+      if (pool !== targetLower) {
+        const receiptToken = await sourcePublicClient.readContract({
+          address: OINK_VAULT_ADDRESS,
+          abi: oinkVaultAbi,
+          functionName: 'protocolReceiptToken',
+          args: [pool as `0x${string}`],
+        });
+
+        const shareBalance = await sourcePublicClient.readContract({
+          address: receiptToken as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [OINK_VAULT_ADDRESS],
+        });
+
+        if (shareBalance > 0n) {
+          let withdrawAmount = shareBalance;
+          try {
+            withdrawAmount = await sourcePublicClient.readContract({
+              address: pool as `0x${string}`,
+              abi: [
+                {
+                  "inputs": [{ "internalType": "uint256", "name": "shares", "type": "uint256" }],
+                  "name": "convertToAssets",
+                  "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+                  "stateMutability": "view",
+                  "type": "function"
+                }
+              ],
+              functionName: 'convertToAssets',
+              args: [shareBalance],
+            });
+          } catch {}
+
+          console.log(`  Withdrawing ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC from old pool: ${pool}...`);
+          
+          const withdrawTx = await sourceWalletClient.writeContract({
+            address: OINK_VAULT_ADDRESS,
+            abi: [
+              {
+                "inputs": [
+                  { "internalType": "address", "name": "_pool", "type": "address" },
+                  { "internalType": "uint256", "name": "_amount", "type": "uint256" }
+                ],
+                "name": "withdrawFromProtocol",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+              }
+            ],
+            functionName: 'withdrawFromProtocol',
+            args: [pool as `0x${string}`, withdrawAmount],
+          });
+          
+          await sourcePublicClient.waitForTransactionReceipt({ hash: withdrawTx });
+          console.log(`  Successfully withdrew from ${pool}. Tx: ${withdrawTx}`);
+        }
+      }
+    }
+
+    // 3. Deposit/invest the target amount into the target pool (clamped to available idle balance)
+    const idleRaw = await sourcePublicClient.readContract({
+      address: USDC_ADDRESS as `0x${string}`,
+      abi: erc20Abi,
+      functionName: 'balanceOf',
+      args: [OINK_VAULT_ADDRESS],
+    });
+
+    let rebalanceAmount = parseUnits(amount.toString(), USD_DECIMALS);
+    if (rebalanceAmount > idleRaw) {
+      console.log(`  Clamping rebalance amount from ${amount} to available idle balance: ${formatUnits(idleRaw, USD_DECIMALS)}`);
+      rebalanceAmount = idleRaw;
+    }
+
+    if (rebalanceAmount === 0n) {
+      console.log("  No idle USDC to invest in target pool.");
+      return { success: true, message: "No funds available to allocate.", isMock: false };
+    }
+
+    console.log(`  Investing ${formatUnits(rebalanceAmount, USD_DECIMALS)} USDC into target pool: ${targetPoolAddress}...`);
     const txHash = await sourceWalletClient.writeContract({
       address: OINK_VAULT_ADDRESS,
       abi: oinkVaultAbi,
       functionName: 'invest',
       args: [targetPoolAddress as `0x${string}`, rebalanceAmount],
     });
+
+    await sourcePublicClient.waitForTransactionReceipt({ hash: txHash });
+    console.log(`  Successfully invested in ${targetPoolAddress}. Tx: ${txHash}`);
+
     return { success: true, txHash, isMock: false };
   } catch (error: any) {
-    // Graceful fallback logging for whitelisting errors
+    console.error("  Rebalance failed:", error);
     return {
       success: false,
-      isMock: true,
-      target: OINK_VAULT_ADDRESS,
-      method: 'invest',
-      args: [targetPoolAddress, rebalanceAmount.toString()],
-      sender: account.address,
-      reason: error.message || error
+      reason: error.message || error,
+      isMock: false
     };
   }
 }
@@ -204,7 +418,23 @@ async function toolExecuteRebalance(amount: number) {
 
 const fetchYieldsSpec = {
   name: 'fetchYields',
-  description: 'Fetches the current yield rates (APY) for USDC from the Aave V4 pools on the source and destination chains.',
+  description: 'Fetches the current yield rates (APY) for USDC from the specified Aave V4 pools.',
+  parameters: {
+    type: SchemaType.OBJECT,
+    properties: {
+      poolAddresses: {
+        type: SchemaType.ARRAY,
+        items: { type: SchemaType.STRING },
+        description: 'The array of Aave V4 pool/spoke addresses to query APY for.'
+      }
+    },
+    required: ['poolAddresses'],
+  },
+};
+
+const getCurrentVaultAllocationSpec = {
+  name: 'getCurrentVaultAllocation',
+  description: 'Queries OinkVault on-chain to retrieve its current idle USDC balance and active yield pool allocations.',
   parameters: {
     type: SchemaType.OBJECT,
     properties: {},
@@ -220,22 +450,6 @@ const estimateCostsSpec = {
   },
 };
 
-const calculateNetProfitSpec = {
-  name: 'calculateNetProfit',
-  description: 'Calculates gross profit, net profit, and yield delta based on yields, principal, duration, and estimated cost.',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      sourceYield: { type: SchemaType.NUMBER, description: 'Source supply APY (e.g. 0.032).' },
-      destYield: { type: SchemaType.NUMBER, description: 'Destination supply APY (e.g. 0.057).' },
-      principal: { type: SchemaType.NUMBER, description: 'USDC principal amount.' },
-      projectedDays: { type: SchemaType.NUMBER, description: 'Projected horizon period in days.' },
-      estimatedCost: { type: SchemaType.NUMBER, description: 'Estimated transaction cost in USDC.' },
-    },
-    required: ['sourceYield', 'destYield', 'principal', 'projectedDays', 'estimatedCost'],
-  },
-};
-
 const executeRebalanceSpec = {
   name: 'executeRebalance',
   description: 'Calls the OinkVault contract to transfer USDC to the destination yield pool.',
@@ -243,8 +457,9 @@ const executeRebalanceSpec = {
     type: SchemaType.OBJECT,
     properties: {
       amount: { type: SchemaType.NUMBER, description: 'USDC principal to invest.' },
+      targetPoolAddress: { type: SchemaType.STRING, description: 'The target pool address.' },
     },
-    required: ['amount'],
+    required: ['amount', 'targetPoolAddress'],
   },
 };
 
@@ -263,27 +478,28 @@ async function runGenerativeAgent() {
     return;
   }
 
-  // -------------------------------------------------------------------------
-  // Live Gemini LLM Agent Mode
-  // -------------------------------------------------------------------------
   console.log(`[Agent Status] Connected to Live Google Gemini API...`);
-  
+
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3.5-flash',
+    model: 'gemini-2.5-flash',
     systemInstruction: `You are the Oink Yield Optimizer AI Agent.
 Your role is to optimize yield for users by moving USDC to the highest yield-bearing Aave V4 pool.
 You must use your tools sequentially:
-1. Call fetchYields() to fetch yields.
-2. Call estimateCosts() to get gas/bridge fees.
-3. Call calculateNetProfit() to evaluate yields against principal: ${PRINCIPAL_AMOUNT} USDC, horizon: ${PROJECTED_DAYS} days, and target profit threshold: ${NET_PROFIT_THRESHOLD} USDC.
-4. If net profit is greater than or equal to the threshold, call executeRebalance() to execute.
-5. Provide a very brief summary of your reasoning and final decision. Avoid long-winded explanations.`,
+1. Call getCurrentVaultAllocation() to fetch the vault's current idle USDC and active pool allocations.
+2. Call fetchYields() passing all candidate pools: [${CANDIDATE_POOLS.join(', ')}] AND any active pools found in the vault.
+3. Call estimateCosts() to estimate fees.
+4. Calculate the Net Profit mathematically in your reasoning:
+   Net Profit = (Highest APY Candidate - Current APY Source) * Principal * (Projected Days / 365) - Estimated Cost.
+   Use the actual principal amount (the idle USDC if allocating new funds, or the active pool balance if reallocating) returned by getCurrentVaultAllocation() as the Principal.
+   The investment horizon is ${PROJECTED_DAYS} days.
+5. If the calculated Net Profit is greater than or equal to the threshold (${NET_PROFIT_THRESHOLD} USDC), call executeRebalance() with the target pool and the principal amount to allocate.
+6. Provide a very brief summary of your reasoning and final decision. Avoid long-winded explanations.`,
     tools: [{
       functionDeclarations: [
+        getCurrentVaultAllocationSpec,
         fetchYieldsSpec,
         estimateCostsSpec,
-        calculateNetProfitSpec,
         executeRebalanceSpec
       ]
     }]
@@ -291,44 +507,39 @@ You must use your tools sequentially:
 
   try {
     const chat = model.startChat();
-    let response = await chat.sendMessage(`Optimize yields. Check yields and evaluate rebalance now.`);
+    let response = await chat.sendMessage(`Optimize yields. Inspect vault state, fetch yields, and evaluate rebalance now.`);
     
     // Process function/tool calls returned by Gemini
     let functionCalls = response.response.functionCalls();
     
     while (functionCalls && functionCalls.length > 0) {
+      const parts: any[] = [];
       for (const call of functionCalls) {
         const { name, args } = call;
         let toolResult: any;
 
-        if (name === 'fetchYields') {
-          toolResult = await toolFetchYields();
+        if (name === 'getCurrentVaultAllocation') {
+          toolResult = await toolGetCurrentVaultAllocation();
+        } else if (name === 'fetchYields') {
+          const params = args as any;
+          toolResult = await toolFetchYields(params.poolAddresses);
         } else if (name === 'estimateCosts') {
           toolResult = await toolEstimateCosts();
-        } else if (name === 'calculateNetProfit') {
-          const params = args as any;
-          toolResult = toolCalculateNetProfit(
-            params.sourceYield,
-            params.destYield,
-            params.principal,
-            params.projectedDays,
-            params.estimatedCost
-          );
         } else if (name === 'executeRebalance') {
           const params = args as any;
-          toolResult = await toolExecuteRebalance(params.amount);
+          toolResult = await toolExecuteRebalance(params.amount, params.targetPoolAddress);
         }
 
-        // Send tool results back to LLM context
-        response = await chat.sendMessage([
-          {
-            functionResponse: {
-              name,
-              response: toolResult
-            }
+        parts.push({
+          functionResponse: {
+            name,
+            response: toolResult
           }
-        ]);
+        });
       }
+
+      // Send all tool results in a single request to conserve API quota
+      response = await chat.sendMessage(parts);
       functionCalls = response.response.functionCalls();
     }
 
