@@ -366,3 +366,79 @@ export async function previewWithdrawShares(
     return amount.toFixed(2); // Fallback to 1:1 peg
   }
 }
+
+export interface VaultDetailsData {
+  totalAssets: string;
+  totalSupply: string;
+  localBalance: string;
+  allocatedBalance: string;
+  sharePrice: string;
+  isSimulated: boolean;
+}
+
+export async function fetchVaultDetails(isSimulated: boolean): Promise<VaultDetailsData> {
+  const DEPLOYED_OINK_VAULT = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
+  const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000";
+
+  if (isSimulated) {
+    // Return mock vault details
+    const mockTotalAssets = localStorage.getItem("oink_vault_mock_total_assets") || "1420.50";
+    const mockTotalSupply = localStorage.getItem("oink_vault_mock_total_supply") || "1380.00";
+    const mockLocal = localStorage.getItem("oink_vault_mock_local") || "120.50";
+    const mockAllocated = localStorage.getItem("oink_vault_mock_allocated") || "1300.00";
+    const sharePrice = (parseFloat(mockTotalAssets) / parseFloat(mockTotalSupply)).toFixed(4);
+    
+    return {
+      totalAssets: mockTotalAssets,
+      totalSupply: mockTotalSupply,
+      localBalance: mockLocal,
+      allocatedBalance: mockAllocated,
+      sharePrice,
+      isSimulated: true
+    };
+  }
+
+  try {
+    const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
+    
+    const vaultAbi = [
+      "function totalAssets() view returns (uint256)",
+      "function totalSupply() view returns (uint256)"
+    ];
+    const usdcAbi = ["function balanceOf(address) view returns (uint256)"];
+    
+    const vaultContract = new ethers.Contract(DEPLOYED_OINK_VAULT, vaultAbi, provider);
+    const usdcContract = new ethers.Contract(ARC_USDC_CONTRACT, usdcAbi, provider);
+
+    const totalAssetsRaw = await vaultContract.totalAssets();
+    const totalSupplyRaw = await vaultContract.totalSupply();
+    const localBalanceRaw = await usdcContract.balanceOf(DEPLOYED_OINK_VAULT);
+
+    const totalAssets = parseFloat(ethers.formatUnits(totalAssetsRaw, 6));
+    const totalSupply = parseFloat(ethers.formatUnits(totalSupplyRaw, 6));
+    const localBalance = parseFloat(ethers.formatUnits(localBalanceRaw, 6));
+    const allocatedBalance = Math.max(0, totalAssets - localBalance);
+
+    const sharePrice = totalSupply > 0 ? (totalAssets / totalSupply).toFixed(4) : "1.0000";
+
+    return {
+      totalAssets: totalAssets.toFixed(2),
+      totalSupply: totalSupply.toFixed(2),
+      localBalance: localBalance.toFixed(2),
+      allocatedBalance: allocatedBalance.toFixed(2),
+      sharePrice,
+      isSimulated: false
+    };
+  } catch (err) {
+    console.error("Failed to fetch OinkVault details from blockchain:", err);
+    // Return defaults on error
+    return {
+      totalAssets: "0.00",
+      totalSupply: "0.00",
+      localBalance: "0.00",
+      allocatedBalance: "0.00",
+      sharePrice: "1.0000",
+      isSimulated: true
+    };
+  }
+}

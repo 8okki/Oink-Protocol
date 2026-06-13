@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   ArrowUpRight,
   X,
-  Info
+  Info,
+  TrendingUp
 } from 'lucide-react';
 import {
   getOrCreateEOA,
@@ -22,9 +23,10 @@ import {
   resetEOA,
   executeOinkPayment,
   executeOinkWithdraw,
-  previewWithdrawShares
+  previewWithdrawShares,
+  fetchVaultDetails
 } from './utils/web3';
-import type { WalletDetails } from './utils/web3';
+import type { WalletDetails, VaultDetailsData } from './utils/web3';
 
 interface Transaction {
   id: string;
@@ -42,14 +44,19 @@ const DEFAULT_VAULT_ADDRESS = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'merchant' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'merchant' | 'settings' | 'vault'>('dashboard');
 
   // Wallet State
   const [wallet, setWallet] = useState<WalletDetails | null>(null);
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
   const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string; vaultUsdc: string; vaultShares: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00', vaultUsdc: '0.00', vaultShares: '0.00' });
   const [copiedText, setCopiedText] = useState<string>('');
+
+  // Vault Monitor State
+  const [vaultDetails, setVaultDetails] = useState<VaultDetailsData | null>(null);
   const [isRefreshingBalances, setIsRefreshingBalances] = useState<boolean>(false);
+  const [hoveredYieldIndex, setHoveredYieldIndex] = useState<number | null>(null);
+  const [hoveredActivityIndex, setHoveredActivityIndex] = useState<number | null>(null);
 
   // Settings State
   const [oinkPolicyEnabled, setOinkPolicyEnabled] = useState<boolean>(() => {
@@ -166,6 +173,10 @@ export default function App() {
     const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated);
     setBalances(bal);
     setLoadingWallet(false);
+
+    // Fetch vault details
+    const vaultDet = await fetchVaultDetails(details.isSimulated);
+    setVaultDetails(vaultDet);
   };
 
   const handleResetWallet = async () => {
@@ -175,6 +186,11 @@ export default function App() {
       localStorage.removeItem('oink_mock_usdc');
       localStorage.setItem('oink_vault_balance', '24.50');
       localStorage.setItem('oink_vault_shares', '24.50');
+      // Reset mock vault monitor assets
+      localStorage.setItem("oink_vault_mock_total_assets", "1420.50");
+      localStorage.setItem("oink_vault_mock_total_supply", "1380.00");
+      localStorage.setItem("oink_vault_mock_local", "120.50");
+      localStorage.setItem("oink_vault_mock_allocated", "1300.00");
       setBalances(prev => ({ ...prev, vaultUsdc: '24.50', vaultShares: '24.50' }));
       await loadWallet(newPkey);
     }
@@ -190,6 +206,11 @@ export default function App() {
         localStorage.removeItem('oink_mock_usdc');
         localStorage.setItem('oink_vault_balance', '0.00');
         localStorage.setItem('oink_vault_shares', '0.00');
+        // Reset mock vault monitor assets
+        localStorage.setItem("oink_vault_mock_total_assets", "0.00");
+        localStorage.setItem("oink_vault_mock_total_supply", "0.00");
+        localStorage.setItem("oink_vault_mock_local", "0.00");
+        localStorage.setItem("oink_vault_mock_allocated", "0.00");
         setBalances(prev => ({ ...prev, vaultUsdc: '0.00', vaultShares: '0.00' }));
         await loadWallet(cleanKey);
       } else {
@@ -201,8 +222,13 @@ export default function App() {
   const handleRefreshBalances = async () => {
     if (!wallet) return;
     setIsRefreshingBalances(true);
+
     const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
     setBalances(bal);
+
+    const vaultDet = await fetchVaultDetails(wallet.isSimulated);
+    setVaultDetails(vaultDet);
+
     setIsRefreshingBalances(false);
   };
 
@@ -245,11 +271,11 @@ export default function App() {
 
   const handlePayClick = () => {
     if (checkoutPrice <= 0) return;
-    
+
     // Check if user has enough USDC in their owner EOA signer wallet
     const userUsdc = parseFloat(balances.eoaUsdc);
     const requiredTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
-    
+
     if (userUsdc < requiredTotal) {
       alert(`Insufficient USDC balance! You have $${userUsdc.toFixed(2)} but this transaction requires $${requiredTotal.toFixed(2)}.`);
       return;
@@ -309,6 +335,19 @@ export default function App() {
         const newShares = parseFloat(balances.vaultShares) + roundup;
         newVaultShares = newShares.toFixed(2);
         localStorage.setItem('oink_vault_shares', newVaultShares);
+
+        // Update mock vault details in localStorage
+        const mockTotalAssets = localStorage.getItem("oink_vault_mock_total_assets") || "1420.50";
+        const mockTotalSupply = localStorage.getItem("oink_vault_mock_total_supply") || "1380.00";
+        const mockLocal = localStorage.getItem("oink_vault_mock_local") || "120.50";
+
+        const newAssetsVal = (parseFloat(mockTotalAssets) + roundup).toFixed(2);
+        const newSupplyVal = (parseFloat(mockTotalSupply) + roundup).toFixed(2);
+        const newLocalVal = (parseFloat(mockLocal) + roundup).toFixed(2);
+
+        localStorage.setItem("oink_vault_mock_total_assets", newAssetsVal);
+        localStorage.setItem("oink_vault_mock_total_supply", newSupplyVal);
+        localStorage.setItem("oink_vault_mock_local", newLocalVal);
       }
 
       // Update state balance
@@ -321,6 +360,10 @@ export default function App() {
 
       txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     }
+
+    // Fetch updated vault details
+    const vaultDet = await fetchVaultDetails(wallet ? wallet.isSimulated : true);
+    setVaultDetails(vaultDet);
 
     // Add transactions to history
     const mainTx: Transaction = {
@@ -370,7 +413,7 @@ export default function App() {
       alert("Please enter a valid amount of USDC to withdraw.");
       return;
     }
-    
+
     const available = parseFloat(balances.vaultUsdc);
     if (amount > available) {
       alert(`Insufficient savings in OinkVault! You can withdraw up to $${available.toFixed(2)} USDC.`);
@@ -378,7 +421,7 @@ export default function App() {
     }
 
     setWithdrawStep('confirm');
-    
+
     // Preview the shares to burn
     if (wallet && !wallet.isSimulated) {
       const shares = await previewWithdrawShares(vaultAddress, amount);
@@ -428,6 +471,19 @@ export default function App() {
       localStorage.setItem('oink_vault_shares', newVaultShares);
       localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
 
+      // Update mock vault details in localStorage
+      const mockTotalAssets = localStorage.getItem("oink_vault_mock_total_assets") || "1420.50";
+      const mockTotalSupply = localStorage.getItem("oink_vault_mock_total_supply") || "1380.00";
+      const mockLocal = localStorage.getItem("oink_vault_mock_local") || "120.50";
+
+      const newAssetsVal = Math.max(0, parseFloat(mockTotalAssets) - amount).toFixed(2);
+      const newSupplyVal = Math.max(0, parseFloat(mockTotalSupply) - amount).toFixed(2);
+      const newLocalVal = Math.max(0, parseFloat(mockLocal) - amount).toFixed(2);
+
+      localStorage.setItem("oink_vault_mock_total_assets", newAssetsVal);
+      localStorage.setItem("oink_vault_mock_total_supply", newSupplyVal);
+      localStorage.setItem("oink_vault_mock_local", newLocalVal);
+
       setBalances(prev => ({
         ...prev,
         vaultUsdc: newVaultUsdc,
@@ -437,6 +493,10 @@ export default function App() {
 
       txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     }
+
+    // Fetch updated vault details
+    const vaultDet = await fetchVaultDetails(wallet ? wallet.isSimulated : true);
+    setVaultDetails(vaultDet);
 
     // Add withdrawal to transaction history
     const withdrawTx: Transaction = {
@@ -455,6 +515,86 @@ export default function App() {
     setWithdrawStep('success');
   };
 
+  // 1. Interpolated Yield Gains data over 30 days
+  const yieldHistory = Array.from({ length: 30 }, (_, i) => {
+    const day = 29 - i;
+    const date = new Date(Date.now() - day * 24 * 3600 * 1000);
+    const currentPrice = vaultDetails ? parseFloat(vaultDetails.sharePrice) : 1.0294;
+    const startPrice = 1.0000;
+
+    // Smooth compounding curve with a little organic drift
+    const progress = i / 29;
+    const curve = Math.sin(progress * Math.PI * 0.5) * 0.95 + progress * 0.05;
+    const price = startPrice + (currentPrice - startPrice) * curve;
+
+    const supply = vaultDetails ? parseFloat(vaultDetails.totalSupply) : 1380.00;
+    const yieldEarned = (price - 1.0000) * supply;
+
+    return {
+      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      sharePrice: price.toFixed(4),
+      yieldEarned: Math.max(0, yieldEarned).toFixed(2),
+      percentage: ((price - 1.0000) * 100).toFixed(2)
+    };
+  });
+
+  // 2. Hybrid mock/real Vault activity history over the past 24 hours
+  const activityHistory = Array.from({ length: 24 }, (_, i) => {
+    const hour = 23 - i;
+    const date = new Date(Date.now() - hour * 3600 * 1000);
+    const hourStr = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    const startOfHour = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), 0, 0, 0).getTime();
+    const endOfHour = startOfHour + 3600 * 1000;
+
+    let deposits = 0;
+    let withdrawals = 0;
+
+    transactions.forEach(tx => {
+      const txTime = new Date(tx.timestamp).getTime();
+      if (txTime >= startOfHour && txTime < endOfHour && tx.status === 'success') {
+        if (tx.type === 'savings') {
+          if (tx.title.includes('Withdrawal')) {
+            withdrawals += tx.amount;
+          } else {
+            deposits += tx.amount;
+          }
+        }
+      }
+    });
+
+    return {
+      date: hourStr,
+      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + hourStr,
+      deposits: parseFloat(deposits.toFixed(2)),
+      withdrawals: parseFloat(withdrawals.toFixed(2))
+    };
+  });
+
+  // Yield Gains chart helper variables
+  const prices = yieldHistory.map(d => parseFloat(d.sharePrice));
+  const minPrice = Math.min(...prices);
+  const maxPrice = Math.max(...prices);
+  const priceRange = maxPrice - minPrice || 0.01;
+  const yMin = Math.max(1.0, minPrice - priceRange * 0.15);
+  const yMax = maxPrice + priceRange * 0.15;
+
+  const getLinePath = () => {
+    return yieldHistory.map((d, index) => {
+      const x = (index / 29) * 500;
+      const y = 170 - ((parseFloat(d.sharePrice) - yMin) / (yMax - yMin)) * 140;
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    }).join(' ');
+  };
+
+  const getAreaPath = () => {
+    const linePath = getLinePath();
+    if (!linePath) return '';
+    return `${linePath} L 500 170 L 0 170 Z`;
+  };
+
+  const maxVolume = Math.max(...activityHistory.map(d => Math.max(d.deposits, d.withdrawals)), 4.0);
+
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
@@ -470,7 +610,7 @@ export default function App() {
             onClick={() => setActiveTab('dashboard')}
           >
             <WalletIcon size={20} />
-            <span>Smart Dashboard</span>
+            <span>Smart Wallet</span>
           </div>
 
           <div
@@ -478,7 +618,15 @@ export default function App() {
             onClick={() => setActiveTab('merchant')}
           >
             <ShoppingBag size={20} />
-            <span>Mock Merchant</span>
+            <span>Merchant Sandbox</span>
+          </div>
+
+          <div
+            className={`nav-link ${activeTab === 'vault' ? 'active' : ''}`}
+            onClick={() => setActiveTab('vault')}
+          >
+            <TrendingUp size={20} />
+            <span>Dashboard</span>
           </div>
 
           <div
@@ -520,6 +668,12 @@ export default function App() {
               <>
                 <h1>Configure Oink</h1>
                 <p>Customize how your spare change is routed to your Oink savings vault.</p>
+              </>
+            )}
+            {activeTab === 'vault' && (
+              <>
+                <h1>OinkVault Analytics</h1>
+                <p>Monitor vault balance, share price, yield growth, and transaction activity.</p>
               </>
             )}
           </div>
@@ -636,10 +790,10 @@ export default function App() {
                       <div className="balance-footer" style={{ marginBottom: '1rem' }}>
                         Equivalent to ${parseFloat(balances.vaultUsdc).toFixed(2)} USDC on-chain
                       </div>
-                      
+
                       {/* Withdraw Action */}
                       <div style={{ display: 'flex', gap: '0.5rem', borderTop: '1px solid var(--card-border)', paddingTop: '0.75rem', marginTop: 'auto' }}>
-                        <input 
+                        <input
                           type="number"
                           step="0.01"
                           placeholder="Withdraw USDC"
@@ -648,7 +802,7 @@ export default function App() {
                           value={withdrawAmount}
                           onChange={(e) => setWithdrawAmount(e.target.value)}
                         />
-                        <button 
+                        <button
                           className="btn btn-pink btn-sm"
                           style={{ height: '36px', whiteSpace: 'nowrap', padding: '0 0.85rem' }}
                           onClick={handleWithdrawClick}
@@ -1021,6 +1175,438 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* TAB: VAULT MONITOR */}
+            {activeTab === 'vault' && (() => {
+              const lineTicks = [0, 7, 14, 21, 29];
+              const priceGridValues = [yMin, yMin + (yMax - yMin) / 2, yMax];
+              return (
+                <div className="tab-content">
+                  <div className="vault-panel">
+
+                    {/* Grid of stats */}
+                    <div className="vault-metrics-grid">
+
+                      {/* Metric 1: Total Assets */}
+                      <div className="glass-card vault-card highlighted">
+                        <div className="vault-card-title">
+                          <Coins size={16} color="var(--primary)" />
+                          Total Assets Under Management
+                        </div>
+                        <div className="vault-card-value">
+                          ${vaultDetails ? parseFloat(vaultDetails.totalAssets).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'} USDC
+                        </div>
+                        <div className="vault-card-desc">
+                          Total funds deposited in OinkVault (Cash + Yield)
+                        </div>
+
+                        <div className="allocation-bar-container">
+                          <div className="allocation-bar-labels">
+                            <span>Local Balance (Cash)</span>
+                            <span>Lending Pools (Yielding)</span>
+                          </div>
+                          <div className="allocation-bar">
+                            <div
+                              className="allocation-segment cash"
+                              style={{
+                                width: `${vaultDetails && parseFloat(vaultDetails.totalAssets) > 0
+                                  ? (parseFloat(vaultDetails.localBalance) / parseFloat(vaultDetails.totalAssets)) * 100
+                                  : 50}%`
+                              }}
+                            />
+                            <div
+                              className="allocation-segment allocated"
+                              style={{
+                                width: `${vaultDetails && parseFloat(vaultDetails.totalAssets) > 0
+                                  ? (parseFloat(vaultDetails.allocatedBalance) / parseFloat(vaultDetails.totalAssets)) * 100
+                                  : 50}%`
+                              }}
+                            />
+                          </div>
+                          <div className="allocation-legend">
+                            <div className="legend-item">
+                              <span className="legend-dot cash"></span>
+                              <span>Idle: ${vaultDetails ? parseFloat(vaultDetails.localBalance).toFixed(2) : '0.00'} USDC</span>
+                            </div>
+                            <div className="legend-item">
+                              <span className="legend-dot allocated"></span>
+                              <span>Yielding: ${vaultDetails ? parseFloat(vaultDetails.allocatedBalance).toFixed(2) : '0.00'} USDC</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Metric 2: Share Price */}
+                      <div className="glass-card vault-card">
+                        <div className="vault-card-title">
+                          <TrendingUp size={16} color="var(--primary)" />
+                          Vault Share Price (ybOINK)
+                        </div>
+                        <div className="vault-card-value">
+                          {vaultDetails ? parseFloat(vaultDetails.sharePrice).toFixed(4) : '1.0000'}
+                        </div>
+                        <div className="vault-card-desc">
+                          Exchange rate representing yield gains relative to USDC
+                        </div>
+
+                        {vaultDetails && parseFloat(vaultDetails.sharePrice) > 1.0 && (
+                          <div className="yield-badge">
+                            <span>📈</span>
+                            <span>+{((parseFloat(vaultDetails.sharePrice) - 1.0) * 100).toFixed(2)}% Cumulative yield gain</span>
+                          </div>
+                        )}
+                      </div>
+
+
+                    </div>
+
+                    {/* Grid of charts */}
+                    <div className="vault-charts-grid">
+
+                      {/* Chart 1: Yield Growth */}
+                      <div className="glass-card chart-card">
+                        <div className="chart-header">
+                          <div>
+                            <h3 className="chart-title">Yield Gains Growth</h3>
+                            <p className="chart-subtitle">Progressive increase of share value and compounding earnings (30d)</p>
+                          </div>
+                          <div className="legend-item" style={{ background: 'rgba(236, 72, 153, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}>
+                            <span className="legend-dot allocated"></span>
+                            <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>ybOINK Rate</span>
+                          </div>
+                        </div>
+
+                        <div className="chart-wrapper">
+                          {/* Tooltip Overlay */}
+                          {hoveredYieldIndex !== null && (
+                            <div
+                              className="chart-tooltip"
+                              style={{
+                                left: `${(hoveredYieldIndex / 29) * 80}%`,
+                                top: '10px'
+                              }}
+                            >
+                              <div className="tooltip-date">{yieldHistory[hoveredYieldIndex].fullDate}</div>
+                              <div className="tooltip-row">
+                                <span className="tooltip-label">Share Price:</span>
+                                <span className="tooltip-val">{yieldHistory[hoveredYieldIndex].sharePrice} USDC</span>
+                              </div>
+                              <div className="tooltip-row">
+                                <span className="tooltip-label">Est. Earnings:</span>
+                                <span className="tooltip-val positive">+${yieldHistory[hoveredYieldIndex].yieldEarned} USDC</span>
+                              </div>
+                              <div className="tooltip-row">
+                                <span className="tooltip-label">ROI:</span>
+                                <span className="tooltip-val positive">+{yieldHistory[hoveredYieldIndex].percentage}%</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <svg
+                            className="chart-svg"
+                            viewBox="0 0 500 200"
+                            preserveAspectRatio="none"
+                            onMouseMove={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const svgWidth = rect.width;
+                              const index = Math.round((x / svgWidth) * 29);
+                              if (index >= 0 && index < 30) {
+                                setHoveredYieldIndex(index);
+                              }
+                            }}
+                            onMouseLeave={() => setHoveredYieldIndex(null)}
+                          >
+                            <defs>
+                              <linearGradient id="yieldAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.2" />
+                                <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.0" />
+                              </linearGradient>
+                            </defs>
+
+                            {/* Grid Lines */}
+                            {priceGridValues.map((val, idx) => {
+                              const y = 170 - ((val - yMin) / (yMax - yMin)) * 140;
+                              return (
+                                <g key={`ygrid-${idx}`}>
+                                  <line
+                                    x1={0}
+                                    y1={y}
+                                    x2={500}
+                                    y2={y}
+                                    stroke="rgba(236, 72, 153, 0.08)"
+                                    strokeDasharray="2 2"
+                                  />
+                                  <text
+                                    x={5}
+                                    y={y - 4}
+                                    fontSize="9"
+                                    fill="var(--text-muted)"
+                                    fontWeight="500"
+                                  >
+                                    {val.toFixed(4)} USDC
+                                  </text>
+                                </g>
+                              );
+                            })}
+
+                            {lineTicks.map(idx => (
+                              <line
+                                key={`grid-${idx}`}
+                                x1={(idx / 29) * 500}
+                                y1={30}
+                                x2={(idx / 29) * 500}
+                                y2={170}
+                                stroke="rgba(236, 72, 153, 0.05)"
+                                strokeDasharray="4 4"
+                              />
+                            ))}
+
+                            {/* Area path */}
+                            <path
+                              d={getAreaPath()}
+                              fill="url(#yieldAreaGrad)"
+                              style={{ transition: 'all 0.3s ease' }}
+                            />
+
+                            {/* Line path */}
+                            <path
+                              d={getLinePath()}
+                              fill="none"
+                              stroke="var(--primary)"
+                              strokeWidth={2.5}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              style={{ transition: 'all 0.3s ease' }}
+                            />
+
+                            {/* Interactive Hover Guides */}
+                            {hoveredYieldIndex !== null && (() => {
+                              const x = (hoveredYieldIndex / 29) * 500;
+                              const y = 170 - ((parseFloat(yieldHistory[hoveredYieldIndex].sharePrice) - yMin) / (yMax - yMin)) * 140;
+                              return (
+                                <>
+                                  <line
+                                    x1={x}
+                                    y1={30}
+                                    x2={x}
+                                    y2={170}
+                                    stroke="var(--primary)"
+                                    strokeWidth={1.5}
+                                    strokeDasharray="3 3"
+                                  />
+                                  <circle
+                                    cx={x}
+                                    cy={y}
+                                    r={6}
+                                    fill="var(--primary)"
+                                    stroke="#ffffff"
+                                    strokeWidth={2}
+                                    style={{ filter: 'drop-shadow(0 0 4px var(--primary))' }}
+                                  />
+                                </>
+                              );
+                            })()}
+
+                            {/* X-axis Labels */}
+                            {lineTicks.map(idx => (
+                              <text
+                                key={`lbl-${idx}`}
+                                x={(idx / 29) * 500}
+                                y={190}
+                                textAnchor="middle"
+                                fontSize="10"
+                                fill="var(--text-muted)"
+                              >
+                                {yieldHistory[idx].date}
+                              </text>
+                            ))}
+                          </svg>
+                        </div>
+                      </div>
+
+                      {/* Chart 2: Vault Activity */}
+                      <div className="glass-card chart-card">
+                        <div className="chart-header">
+                          <div>
+                            <h3 className="chart-title">Vault Activity History</h3>
+                            <p className="chart-subtitle">Hourly volume of deposits & withdrawals (24h)</p>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.75rem' }}>
+                            <div className="legend-item" style={{ fontSize: '0.75rem' }}>
+                              <span className="legend-dot cash" style={{ width: '8px', height: '8px' }}></span>
+                              <span>Deposits</span>
+                            </div>
+                            <div className="legend-item" style={{ fontSize: '0.75rem' }}>
+                              <span className="legend-dot" style={{ width: '8px', height: '8px', background: 'transparent', border: '1.5px solid var(--text-muted)', borderRadius: '50%' }}></span>
+                              <span>Withdrawals</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="chart-wrapper">
+                          {/* Tooltip Overlay */}
+                          {hoveredActivityIndex !== null && (
+                            <div
+                              className="chart-tooltip"
+                              style={{
+                                left: `${(hoveredActivityIndex / (activityHistory.length - 1)) * 75}%`,
+                                top: '10px'
+                              }}
+                            >
+                              <div className="tooltip-date">{activityHistory[hoveredActivityIndex].fullDate}</div>
+                              <div className="tooltip-row">
+                                <span className="tooltip-label">Deposits:</span>
+                                <span className="tooltip-val positive">+${activityHistory[hoveredActivityIndex].deposits.toFixed(2)} USDC</span>
+                              </div>
+                              <div className="tooltip-row">
+                                <span className="tooltip-label">Withdrawals:</span>
+                                <span className="tooltip-val negative">-${activityHistory[hoveredActivityIndex].withdrawals.toFixed(2)} USDC</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <svg
+                            className="chart-svg"
+                            viewBox="0 0 500 200"
+                            preserveAspectRatio="none"
+                            onMouseMove={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const x = e.clientX - rect.left;
+                              const svgWidth = rect.width;
+                              const index = Math.floor((x / svgWidth) * activityHistory.length);
+                              if (index >= 0 && index < activityHistory.length) {
+                                setHoveredActivityIndex(index);
+                              }
+                            }}
+                            onMouseLeave={() => setHoveredActivityIndex(null)}
+                          >
+                            {/* Grid Lines */}
+                            {[0, maxVolume / 2, maxVolume].map((val, idx) => {
+                              const y = 170 - (val / maxVolume) * 130;
+                              return (
+                                <g key={`actgrid-${idx}`}>
+                                  <line
+                                    x1={0}
+                                    y1={y}
+                                    x2={500}
+                                    y2={y}
+                                    stroke="rgba(236, 72, 153, 0.08)"
+                                    strokeDasharray="2 2"
+                                  />
+                                  {val > 0 && (
+                                    <text
+                                      x={5}
+                                      y={y - 4}
+                                      fontSize="9"
+                                      fill="var(--text-muted)"
+                                      fontWeight="500"
+                                    >
+                                      {val.toFixed(1)} USDC
+                                    </text>
+                                  )}
+                                </g>
+                              );
+                            })}
+
+                            {/* Hover Column Highlight */}
+                            {hoveredActivityIndex !== null && (() => {
+                              const slotW = 500 / activityHistory.length;
+                              const x = hoveredActivityIndex * slotW;
+                              return (
+                                <rect
+                                  x={x + 1}
+                                  y={30}
+                                  width={slotW - 2}
+                                  height={140}
+                                  fill="rgba(236, 72, 153, 0.04)"
+                                  rx={4}
+                                />
+                              );
+                            })()}
+
+                            {/* Bars */}
+                            {activityHistory.map((d, index) => {
+                              const slotW = 500 / activityHistory.length;
+                              const xCenter = index * slotW + slotW / 2;
+                              const barW = Math.max(3, slotW * 0.25);
+                              const xDep = xCenter - barW - 1;
+                              const xWith = xCenter + 1;
+                              const depH = (d.deposits / maxVolume) * 130;
+                              const withH = (d.withdrawals / maxVolume) * 130;
+                              const yDep = 170 - depH;
+                              const yWith = 170 - withH;
+                              const isHovered = hoveredActivityIndex === index;
+
+                              return (
+                                <g key={`activity-hour-${index}`}>
+                                  {/* Deposit Bar */}
+                                  {d.deposits > 0 && (
+                                    <rect
+                                      x={xDep}
+                                      y={yDep}
+                                      width={barW}
+                                      height={depH}
+                                      fill={isHovered ? "var(--primary)" : "var(--secondary)"}
+                                      rx={1.5}
+                                      style={{ transition: 'all 0.15s ease' }}
+                                    />
+                                  )}
+                                  {/* Withdrawal Bar */}
+                                  {d.withdrawals > 0 && (
+                                    <rect
+                                      x={xWith}
+                                      y={yWith}
+                                      width={barW}
+                                      height={withH}
+                                      fill="none"
+                                      stroke="var(--text-muted)"
+                                      strokeWidth={1.5}
+                                      rx={1.5}
+                                      style={{ transition: 'all 0.15s ease' }}
+                                    />
+                                  )}
+                                </g>
+                              );
+                            })}
+
+                            {/* X Axis Line */}
+                            <line
+                              x1={0}
+                              y1={170}
+                              x2={500}
+                              y2={170}
+                              stroke="rgba(236, 72, 153, 0.15)"
+                              strokeWidth={1.5}
+                            />
+
+                            {/* X-axis Labels */}
+                            {activityHistory.map((d, index) => {
+                              if (index % 6 !== 0 && index !== activityHistory.length - 1) return null;
+                              const slotW = 500 / activityHistory.length;
+                              return (
+                                <text
+                                  key={`actlbl-${index}`}
+                                  x={index * slotW + slotW / 2}
+                                  y={190}
+                                  textAnchor="middle"
+                                  fontSize="9"
+                                  fill="var(--text-muted)"
+                                >
+                                  {d.date}
+                                </text>
+                              );
+                            })}
+                          </svg>
+                        </div>
+                      </div>
+
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
       </main>
