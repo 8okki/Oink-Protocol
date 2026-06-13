@@ -44,7 +44,7 @@ export default function App() {
   // Wallet State
   const [wallet, setWallet] = useState<WalletDetails | null>(null);
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
-  const [balances, setBalances] = useState<{ eth: string; usdc: string }>({ eth: '0.00', usdc: '0.00' });
+  const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00' });
   const [vaultBalance, setVaultBalance] = useState<number>(() => {
     return parseFloat(localStorage.getItem('oink_vault_balance') || '24.50');
   });
@@ -62,9 +62,6 @@ export default function App() {
   const [vaultAddress, setVaultAddress] = useState<string>(() => {
     return localStorage.getItem('oink_vault_address') || DEFAULT_VAULT_ADDRESS;
   });
-
-  // Faucet state
-  const [faucetLoading, setFaucetLoading] = useState<boolean>(false);
 
   // Merchant State
   const [selectedItem, setSelectedItem] = useState<{ id: string; name: string; price: number; emoji: string } | null>(null);
@@ -164,7 +161,7 @@ export default function App() {
     setWallet(details);
     
     // Fetch balances
-    const bal = await fetchBalances(details.smartAccountAddress, details.isSimulated);
+    const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated);
     setBalances(bal);
     setLoadingWallet(false);
   };
@@ -179,10 +176,26 @@ export default function App() {
     }
   };
 
+  const handleImportPrivateKey = async () => {
+    const pkey = window.prompt("Enter your EOA Private Key (64-character hex starting with 0x):");
+    if (pkey) {
+      const cleanKey = pkey.trim();
+      if (/^0x[a-fA-F0-9]{64}$/.test(cleanKey)) {
+        localStorage.setItem("oink_eoa_private_key", cleanKey);
+        localStorage.removeItem('oink_mock_eth');
+        localStorage.removeItem('oink_mock_usdc');
+        setVaultBalance(0.00); // Reset local mock vault balance to query actuals if needed
+        await loadWallet(cleanKey);
+      } else {
+        alert("Invalid private key format! It must be a 64-character hex string starting with 0x.");
+      }
+    }
+  };
+
   const handleRefreshBalances = async () => {
     if (!wallet) return;
     setIsRefreshingBalances(true);
-    const bal = await fetchBalances(wallet.smartAccountAddress, wallet.isSimulated);
+    const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
     setBalances(bal);
     setIsRefreshingBalances(false);
   };
@@ -191,38 +204,6 @@ export default function App() {
     navigator.clipboard.writeText(text);
     setCopiedText(type);
     setTimeout(() => setCopiedText(''), 2000);
-  };
-
-  const triggerFaucet = async () => {
-    if (!wallet) return;
-    setFaucetLoading(true);
-    // Simulating faucet funding delay
-    await new Promise(r => setTimeout(r, 1200));
-
-    const currentUsdc = parseFloat(balances.usdc);
-    const currentEth = parseFloat(balances.eth);
-    
-    const newUsdc = (currentUsdc + 100.00).toFixed(2);
-    const newEth = (currentEth + 0.05).toFixed(4);
-
-    localStorage.setItem('oink_mock_usdc', newUsdc);
-    localStorage.setItem('oink_mock_eth', newEth);
-
-    setBalances({ usdc: newUsdc, eth: newEth });
-    setFaucetLoading(false);
-    
-    // Log faucet transaction
-    const newTx: Transaction = {
-      id: `faucet-${Date.now()}`,
-      type: 'purchase',
-      title: 'USDC & ETH Faucet Refill',
-      amount: 100.00,
-      roundup: 0,
-      timestamp: new Date().toISOString(),
-      status: 'success',
-      txHash: '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('')
-    };
-    setTransactions(prev => [newTx, ...prev]);
   };
 
   // Store Items definition
@@ -458,9 +439,8 @@ export default function App() {
                     </div>
                     
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
-                      <button className="btn btn-pink btn-sm" onClick={triggerFaucet} disabled={faucetLoading}>
-                        <Coins size={14} />
-                        {faucetLoading ? 'Funding...' : 'Refill Faucet ($100 USDC)'}
+                      <button className="btn btn-secondary btn-sm" onClick={handleImportPrivateKey}>
+                        Import Key
                       </button>
                       <button className="btn btn-secondary btn-sm btn-danger" onClick={handleResetWallet}>
                         Reset Key
@@ -530,14 +510,29 @@ export default function App() {
                   <div className="glass-card">
                     <div className="balance-item">
                       <div className="balance-header">
-                        <span>USDC Balance</span>
-                        <Coins size={18} color="#2775ca" />
+                        <span>Smart Wallet USDC</span>
+                        <Coins size={18} color="#db2777" />
                       </div>
                       <div className="balance-amount">
                         ${parseFloat(balances.usdc).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>USDC</span>
                       </div>
                       <div className="balance-footer">
-                        Available for payments & checkout
+                        Funds held in Oink Smart Account contract
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="glass-card glow-pink">
+                    <div className="balance-item">
+                      <div className="balance-header">
+                        <span>Owner EOA USDC</span>
+                        <Coins size={18} color="#2775ca" />
+                      </div>
+                      <div className="balance-amount highlight-pink">
+                        ${parseFloat(balances.eoaUsdc).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>USDC</span>
+                      </div>
+                      <div className="balance-footer">
+                        Real USDC balance of owner EOA signer wallet
                       </div>
                     </div>
                   </div>

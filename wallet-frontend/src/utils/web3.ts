@@ -3,6 +3,8 @@ import { createSmartAccountClient } from "@biconomy/account";
 
 const ARC_TESTNET_RPC = "https://rpc.testnet.arc.network";
 const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000"; // Native Arc Testnet USDC (ERC-20 interface)
+const DEPLOYED_OINK_SMART_ACCOUNT = "0x27fBe874f49a944b605Fcf38f702634b0D76c26f";
+const DEPLOYER_EOA_ADDRESS = "0x4636b45ac382f5429b36f5d7b7ba8fe2b7406d2f";
 
 export interface WalletDetails {
   privateKey: string;
@@ -15,9 +17,8 @@ export interface WalletDetails {
 export function getOrCreateEOA(): string {
   let pkey = localStorage.getItem("oink_eoa_private_key");
   if (!pkey) {
-    const randomWallet = ethers.Wallet.createRandom();
-    pkey = randomWallet.privateKey;
-    localStorage.setItem("oink_eoa_private_key", pkey);
+    // Default to the user's deployed address configuration
+    pkey = "default";
   }
   return pkey;
 }
@@ -31,10 +32,30 @@ export function resetEOA(): string {
 
 // Initialize Biconomy Smart Account
 export async function initBiconomyAccount(privateKey: string): Promise<WalletDetails> {
+  // If no private key has been imported yet, default to showing the actual EOA and contract addresses
+  if (privateKey === "default") {
+    return {
+      privateKey: "default",
+      signerAddress: DEPLOYER_EOA_ADDRESS,
+      smartAccountAddress: DEPLOYED_OINK_SMART_ACCOUNT,
+      isSimulated: false, // Set to false to allow on-chain balance fetching
+    };
+  }
+
   try {
     const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
     const signer = new ethers.Wallet(privateKey, provider);
     
+    // If it's the deployer EOA, link directly to the deployed OinkSmartAccount on Arc
+    if (signer.address.toLowerCase() === DEPLOYER_EOA_ADDRESS.toLowerCase()) {
+      return {
+        privateKey,
+        signerAddress: signer.address,
+        smartAccountAddress: DEPLOYED_OINK_SMART_ACCOUNT,
+        isSimulated: false,
+      };
+    }
+
     // We use a custom bundler URL targeting Arc Testnet (Chain ID 5042002) for Biconomy setup.
     const bundlerUrl = "https://bundler.biconomy.io/api/v2/5042002/nPt4VTZQ6.5e9f1222-30d8-4f8b-b78f-6b22b10a26d7";
 
@@ -57,6 +78,17 @@ export async function initBiconomyAccount(privateKey: string): Promise<WalletDet
     
     // Graceful fallback for mock/offline demo
     const tempSigner = new ethers.Wallet(privateKey);
+    
+    // Even in simulation fallback, if the key belongs to the deployer, map it to the deployed contract
+    if (tempSigner.address.toLowerCase() === DEPLOYER_EOA_ADDRESS.toLowerCase()) {
+      return {
+        privateKey,
+        signerAddress: tempSigner.address,
+        smartAccountAddress: DEPLOYED_OINK_SMART_ACCOUNT,
+        isSimulated: false, // Set to false to allow querying balances of the deployed contract on-chain
+      };
+    }
+
     // Derive a simulated deterministic smart account address from the EOA
     const mockSmartAccountAddress = ethers.getCreateAddress({
       from: tempSigner.address,
@@ -75,41 +107,57 @@ export async function initBiconomyAccount(privateKey: string): Promise<WalletDet
 // Fetch balances (on-chain with local storage overrides for mock USDC transactions)
 export async function fetchBalances(
   smartAccountAddress: string,
+  signerAddress: string,
   isSimulated: boolean
-): Promise<{ eth: string; usdc: string }> {
+): Promise<{ eth: string; usdc: string; eoaUsdc: string }> {
   if (isSimulated) {
     // Return mock values stored or defaults
     const mockEth = localStorage.getItem("oink_mock_eth") || "0.025";
     const mockUsdc = localStorage.getItem("oink_mock_usdc") || "100.00";
-    return { eth: mockEth, usdc: mockUsdc };
+    const mockEoaUsdc = localStorage.getItem("oink_mock_eoa_usdc") || "20.00";
+    return { eth: mockEth, usdc: mockUsdc, eoaUsdc: mockEoaUsdc };
   }
 
   try {
     const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
     
-    // Fetch ETH (native gas USDC) balance
+    // Fetch ETH (native gas USDC) balance of the Smart Account
     const ethBalanceRaw = await provider.getBalance(smartAccountAddress);
     const ethBalance = parseFloat(ethers.formatEther(ethBalanceRaw)).toFixed(4);
 
-    // Fetch USDC balance (ERC-20 standard interface with 6 decimals)
+    // Fetch USDC balances (ERC-20 standard interface with 6 decimals)
     let usdcBalance = "0.00";
+    let eoaUsdcBalance = "0.00";
+    
+    const usdcAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
+    const usdcContract = new ethers.Contract(ARC_USDC_CONTRACT, usdcAbi, provider);
+    
     try {
-      const usdcAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-      const usdcContract = new ethers.Contract(ARC_USDC_CONTRACT, usdcAbi, provider);
       const usdcBalanceRaw = await usdcContract.balanceOf(smartAccountAddress);
       usdcBalance = parseFloat(ethers.formatUnits(usdcBalanceRaw, 6)).toFixed(2);
-    } catch {
-      // Fallback to local storage for USDC if token fetch fails
-      usdcBalance = localStorage.getItem("oink_mock_usdc") || "100.00";
+    } catch (err) {
+      console.warn("Failed to fetch Smart Account USDC balance:", err);
+      usdcBalance = localStorage.getItem("oink_mock_usdc") || "0.00";
     }
 
-    return { eth: ethBalance, usdc: usdcBalance };
+    if (signerAddress) {
+      try {
+        const eoaUsdcBalanceRaw = await usdcContract.balanceOf(signerAddress);
+        eoaUsdcBalance = parseFloat(ethers.formatUnits(eoaUsdcBalanceRaw, 6)).toFixed(2);
+      } catch (err) {
+        console.warn("Failed to fetch EOA USDC balance:", err);
+        eoaUsdcBalance = localStorage.getItem("oink_mock_eoa_usdc") || "20.00";
+      }
+    }
+
+    return { eth: ethBalance, usdc: usdcBalance, eoaUsdc: eoaUsdcBalance };
   } catch (error) {
     console.error("Error fetching balances from blockchain:", error);
     // Return standard mock values on error
     const mockEth = localStorage.getItem("oink_mock_eth") || "0.025";
-    const mockUsdc = localStorage.getItem("oink_mock_usdc") || "100.00";
-    return { eth: mockEth, usdc: mockUsdc };
+    const mockUsdc = localStorage.getItem("oink_mock_usdc") || "0.00";
+    const mockEoaUsdc = localStorage.getItem("oink_mock_eoa_usdc") || "20.00";
+    return { eth: mockEth, usdc: mockUsdc, eoaUsdc: mockEoaUsdc };
   }
 }
 
