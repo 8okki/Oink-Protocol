@@ -149,6 +149,9 @@ contract OinkVault is ERC4626, Ownable {
      * @notice Sum of local USDC and assets deployed in all active protocols.
      */
     function totalAssets() public view virtual override returns (uint256) {
+        if (totalSupply() == 0) {
+            return 0;
+        }
         uint256 localBalance = IERC20(asset()).balanceOf(address(this));
         uint256 allocatedBalance = 0;
 

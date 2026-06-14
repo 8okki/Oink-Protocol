@@ -23,6 +23,7 @@ contract DeployMocks is Script {
             320,
             deployerAddress
         );
+        coreSpoke.setTimeMultiplier(10000);
 
         // 2. Deploy Prime Spoke (4.5% APY)
         MockAaveV4Spoke primeSpoke = new MockAaveV4Spoke(
@@ -32,6 +33,7 @@ contract DeployMocks is Script {
             450,
             deployerAddress
         );
+        primeSpoke.setTimeMultiplier(10000);
 
         // 3. Deploy Plus Spoke (5.8% APY)
         MockAaveV4Spoke plusSpoke = new MockAaveV4Spoke(
@@ -41,6 +43,7 @@ contract DeployMocks is Script {
             580,
             deployerAddress
         );
+        plusSpoke.setTimeMultiplier(10000);
 
         // 4. Automatically Whitelist Spokes in OinkVault
         OinkVault vault = OinkVault(vaultAddress);
