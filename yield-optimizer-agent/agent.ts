@@ -81,7 +81,7 @@ const RAY = 10n ** 27n;
 const USD_DECIMALS = 6;
 
 const ALLOCATOR_PK = process.env.ALLOCATOR_PRIVATE_KEY as `0x${string}`;
-const OINK_VAULT_ADDRESS = (process.env.OINK_VAULT_ADDRESS || '0x18A49aEF7e31ea27E727025185F12FF0633cd6Db') as `0x${string}`;
+const OINK_VAULT_ADDRESS = (process.env.OINK_VAULT_ADDRESS || '0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0') as `0x${string}`;
 const USDC_ADDRESS = (process.env.USDC_ADDRESS || '0x3600000000000000000000000000000000000000') as `0x${string}`;
 
 // Parse candidate pools array
@@ -345,28 +345,38 @@ async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
             });
           } catch {}
 
+          // Skip if the amount is less than 0.01 USDC (10000 Wei)
+          if (withdrawAmount < 10000n) {
+            console.log(`  Skipping withdrawal from ${pool} as the balance is negligible: ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC`);
+            continue;
+          }
+
           console.log(`  Withdrawing ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC from old pool: ${pool}...`);
           
-          const withdrawTx = await sourceWalletClient.writeContract({
-            address: OINK_VAULT_ADDRESS,
-            abi: [
-              {
-                "inputs": [
-                  { "internalType": "address", "name": "_pool", "type": "address" },
-                  { "internalType": "uint256", "name": "_amount", "type": "uint256" }
-                ],
-                "name": "withdrawFromProtocol",
-                "outputs": [],
-                "stateMutability": "nonpayable",
-                "type": "function"
-              }
-            ],
-            functionName: 'withdrawFromProtocol',
-            args: [pool as `0x${string}`, withdrawAmount],
-          });
-          
-          await sourcePublicClient.waitForTransactionReceipt({ hash: withdrawTx });
-          console.log(`  Successfully withdrew from ${pool}. Tx: ${withdrawTx}`);
+          try {
+            const withdrawTx = await sourceWalletClient.writeContract({
+              address: OINK_VAULT_ADDRESS,
+              abi: [
+                {
+                  "inputs": [
+                    { "internalType": "address", "name": "_pool", "type": "address" },
+                    { "internalType": "uint256", "name": "_amount", "type": "uint256" }
+                  ],
+                  "name": "withdrawFromProtocol",
+                  "outputs": [],
+                  "stateMutability": "nonpayable",
+                  "type": "function"
+                }
+              ],
+              functionName: 'withdrawFromProtocol',
+              args: [pool as `0x${string}`, withdrawAmount],
+            });
+            
+            await sourcePublicClient.waitForTransactionReceipt({ hash: withdrawTx });
+            console.log(`  Successfully withdrew from ${pool}. Tx: ${withdrawTx}`);
+          } catch (err: any) {
+            console.warn(`  Warning: Failed to withdraw from old pool ${pool}:`, err.message || err);
+          }
         }
       }
     }
@@ -482,7 +492,7 @@ async function runGenerativeAgent() {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.1-flash-lite',
     systemInstruction: `You are the Oink Yield Optimizer AI Agent.
 Your role is to optimize yield for users by moving USDC to the highest yield-bearing Aave V4 pool.
 You must use your tools sequentially:
