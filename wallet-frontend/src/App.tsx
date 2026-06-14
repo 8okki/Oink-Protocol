@@ -500,7 +500,7 @@ export default function App() {
 
   const getLinePath = () => {
     return yieldHistory.map((d, index) => {
-      const x = (index / (yieldHistory.length - 1)) * 500;
+      const x = 70 + (index / (yieldHistory.length - 1)) * 430;
       const y = 170 - ((parseFloat(d.sharePrice) - yMin) / (yMax - yMin)) * 140;
       return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
     }).join(' ');
@@ -509,7 +509,7 @@ export default function App() {
   const getAreaPath = () => {
     const linePath = getLinePath();
     if (!linePath) return '';
-    return `${linePath} L 500 170 L 0 170 Z`;
+    return `${linePath} L 500 170 L 70 170 Z`;
   };
 
   const maxVolume = Math.max(...activityHistory.map(d => Math.max(d.deposits, d.withdrawals)), 4.0);
@@ -889,9 +889,9 @@ export default function App() {
                           {oinkPolicyEnabled && checkoutRoundup > 0 ? (
                             <>
                               <div className="receipt-row" style={{ color: 'var(--secondary)' }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}>
+                                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.2rem', fontWeight: 600 }}>
                                   <span>🐖 Oink Round-Up</span>
-                                  <span style={{ fontSize: '0.7rem', padding: '1px 5px', background: 'rgba(236,72,153,0.12)', borderRadius: '4px', textTransform: 'uppercase' }}>
+                                  <span style={{ fontSize: '0.7rem', padding: '1px 5px', background: 'rgba(236,72,153,0.12)', borderRadius: '4px', textTransform: 'uppercase', fontWeight: 500, letterSpacing: '0.02em' }}>
                                     {oinkPolicy.replace('nearest-', 'Nearest $')}
                                   </span>
                                 </span>
@@ -1211,7 +1211,7 @@ export default function App() {
                             <div
                               className="chart-tooltip"
                               style={{
-                                left: `${(hoveredYieldIndex / (yieldHistory.length - 1)) * 80}%`,
+                                left: `${14 + (hoveredYieldIndex / (yieldHistory.length - 1)) * 68.8}%`,
                                 top: '10px'
                               }}
                             >
@@ -1239,9 +1239,13 @@ export default function App() {
                               const rect = e.currentTarget.getBoundingClientRect();
                               const x = e.clientX - rect.left;
                               const svgWidth = rect.width;
-                              const index = Math.round((x / svgWidth) * (yieldHistory.length - 1));
+                              const svgX = (x / svgWidth) * 500;
+                              const fraction = (svgX - 70) / 430;
+                              const index = Math.round(fraction * (yieldHistory.length - 1));
                               if (index >= 0 && index < yieldHistory.length) {
                                 setHoveredYieldIndex(index);
+                              } else {
+                                setHoveredYieldIndex(null);
                               }
                             }}
                             onMouseLeave={() => setHoveredYieldIndex(null)}
@@ -1259,7 +1263,7 @@ export default function App() {
                               return (
                                 <g key={`ygrid-${idx}`}>
                                   <line
-                                    x1={0}
+                                    x1={70}
                                     y1={y}
                                     x2={500}
                                     y2={y}
@@ -1282,9 +1286,9 @@ export default function App() {
                             {lineTicks.map(idx => (
                               <line
                                 key={`grid-${idx}`}
-                                x1={(idx / (yieldHistory.length - 1)) * 500}
+                                x1={70 + (idx / (yieldHistory.length - 1)) * 430}
                                 y1={30}
-                                x2={(idx / (yieldHistory.length - 1)) * 500}
+                                x2={70 + (idx / (yieldHistory.length - 1)) * 430}
                                 y2={170}
                                 stroke="rgba(236, 72, 153, 0.05)"
                                 strokeDasharray="4 4"
@@ -1311,7 +1315,7 @@ export default function App() {
 
                             {/* Interactive Hover Guides */}
                             {hoveredYieldIndex !== null && (() => {
-                              const x = (hoveredYieldIndex / (yieldHistory.length - 1)) * 500;
+                              const x = 70 + (hoveredYieldIndex / (yieldHistory.length - 1)) * 430;
                               const y = 170 - ((parseFloat(yieldHistory[hoveredYieldIndex].sharePrice) - yMin) / (yMax - yMin)) * 140;
                               return (
                                 <>
@@ -1341,7 +1345,7 @@ export default function App() {
                             {lineTicks.map(idx => (
                               <text
                                 key={`lbl-${idx}`}
-                                x={(idx / (yieldHistory.length - 1)) * 500}
+                                x={70 + (idx / (yieldHistory.length - 1)) * 430}
                                 y={190}
                                 textAnchor="middle"
                                 fontSize="10"
@@ -1379,7 +1383,7 @@ export default function App() {
                             <div
                               className="chart-tooltip"
                               style={{
-                                left: `${(hoveredActivityIndex / (activityHistory.length - 1)) * 75}%`,
+                                left: `${10 + (hoveredActivityIndex / (activityHistory.length - 1)) * 67.5}%`,
                                 top: '10px'
                               }}
                             >
@@ -1403,9 +1407,13 @@ export default function App() {
                               const rect = e.currentTarget.getBoundingClientRect();
                               const x = e.clientX - rect.left;
                               const svgWidth = rect.width;
-                              const index = Math.floor((x / svgWidth) * activityHistory.length);
+                              const svgX = (x / svgWidth) * 500;
+                              const fraction = (svgX - 50) / 450;
+                              const index = Math.floor(fraction * activityHistory.length);
                               if (index >= 0 && index < activityHistory.length) {
                                 setHoveredActivityIndex(index);
+                              } else {
+                                setHoveredActivityIndex(null);
                               }
                             }}
                             onMouseLeave={() => setHoveredActivityIndex(null)}
@@ -1416,7 +1424,7 @@ export default function App() {
                               return (
                                 <g key={`actgrid-${idx}`}>
                                   <line
-                                    x1={0}
+                                    x1={50}
                                     y1={y}
                                     x2={500}
                                     y2={y}
@@ -1440,8 +1448,8 @@ export default function App() {
 
                             {/* Hover Column Highlight */}
                             {hoveredActivityIndex !== null && (() => {
-                              const slotW = 500 / activityHistory.length;
-                              const x = hoveredActivityIndex * slotW;
+                              const slotW = 450 / activityHistory.length;
+                              const x = 50 + hoveredActivityIndex * slotW;
                               return (
                                 <rect
                                   x={x + 1}
@@ -1456,8 +1464,8 @@ export default function App() {
 
                             {/* Bars */}
                             {activityHistory.map((d, index) => {
-                              const slotW = 500 / activityHistory.length;
-                              const xCenter = index * slotW + slotW / 2;
+                              const slotW = 450 / activityHistory.length;
+                              const xCenter = 50 + index * slotW + slotW / 2;
                               const barW = Math.max(3, slotW * 0.25);
                               const xDep = xCenter - barW - 1;
                               const xWith = xCenter + 1;
@@ -1501,7 +1509,7 @@ export default function App() {
 
                             {/* X Axis Line */}
                             <line
-                              x1={0}
+                              x1={50}
                               y1={170}
                               x2={500}
                               y2={170}
@@ -1512,11 +1520,11 @@ export default function App() {
                             {/* X-axis Labels */}
                             {activityHistory.map((d, index) => {
                               if (index % 6 !== 0 && index !== activityHistory.length - 1) return null;
-                              const slotW = 500 / activityHistory.length;
+                              const slotW = 450 / activityHistory.length;
                               return (
                                 <text
                                   key={`actlbl-${index}`}
-                                  x={index * slotW + slotW / 2}
+                                  x={50 + index * slotW + slotW / 2}
                                   y={190}
                                   textAnchor="middle"
                                   fontSize="9"
