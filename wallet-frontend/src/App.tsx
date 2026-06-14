@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Wallet as WalletIcon,
   Coins,
@@ -12,8 +12,6 @@ import {
   ShieldCheck,
   ArrowUpRight,
   X,
-  Info,
-  TrendingUp,
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
@@ -25,10 +23,9 @@ import {
   resetEOA,
   executeOinkPayment,
   executeOinkWithdraw,
-  previewWithdrawShares,
-  fetchVaultDetails
+  previewWithdrawShares
 } from './utils/web3';
-import type { WalletDetails, VaultDetailsData } from './utils/web3';
+import type { WalletDetails } from './utils/web3';
 
 interface Transaction {
   id: string;
@@ -42,24 +39,62 @@ interface Transaction {
 }
 
 const MERCHANT_ADDRESS = "0x2191e22e44341741D741aC5adE90A23220a84275";
-const DEFAULT_VAULT_ADDRESS = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
+const DEFAULT_VAULT_ADDRESS = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
+
+const INTRO_ELEMENTS: Array<{
+  type: 'coin' | 'bill';
+  left: string;
+  size?: number;
+  w?: number;
+  h?: number;
+  delay: string;
+  dur: string;
+  rotS: string;
+  rotE: string;
+}> = [
+  { type: 'coin', left: '5%',  size: 20, delay: '0s',    dur: '2.1s', rotS: '-22deg', rotE: '12deg'  },
+  { type: 'bill', left: '14%', w: 38, h: 22, delay: '0.38s', dur: '2.4s', rotS: '-7deg',  rotE: '9deg'   },
+  { type: 'coin', left: '25%', size: 16, delay: '0.72s', dur: '1.85s',rotS: '13deg',  rotE: '-18deg' },
+  { type: 'coin', left: '37%', size: 25, delay: '0.14s', dur: '2.2s', rotS: '-4deg',  rotE: '21deg'  },
+  { type: 'bill', left: '48%', w: 44, h: 26, delay: '0.55s', dur: '2.5s', rotS: '5deg',   rotE: '-10deg' },
+  { type: 'coin', left: '60%', size: 18, delay: '0.88s', dur: '2.0s', rotS: '-16deg', rotE: '7deg'   },
+  { type: 'coin', left: '71%', size: 23, delay: '0.28s', dur: '2.3s', rotS: '9deg',   rotE: '-23deg' },
+  { type: 'bill', left: '80%', w: 40, h: 23, delay: '0.65s', dur: '2.05s',rotS: '-8deg',  rotE: '13deg'  },
+  { type: 'coin', left: '90%', size: 15, delay: '1.05s', dur: '1.75s',rotS: '20deg',  rotE: '-9deg'  },
+  { type: 'coin', left: '43%', size: 21, delay: '0.48s', dur: '2.0s', rotS: '-13deg', rotE: '18deg'  },
+  { type: 'coin', left: '19%', size: 17, delay: '1.25s', dur: '2.15s',rotS: '7deg',   rotE: '-15deg' },
+  { type: 'bill', left: '57%', w: 36, h: 21, delay: '0.82s', dur: '2.25s',rotS: '-4deg',  rotE: '11deg'  },
+];
+
+// Seeded demo data so charts look alive on testnet with sparse real transactions
+const _DEMO_EPOCH = Date.now();
+const _DAY = 86400000;
+
+const SEEDED_VAULT_EVENTS = [
+  { amount: 20.00, timestamp: new Date(_DEMO_EPOCH - 32*_DAY).toISOString(), title: 'Initial Vault Deposit',  type: 'deposit'  as const },
+  { amount:  2.00, timestamp: new Date(_DEMO_EPOCH - 22*_DAY).toISOString(), title: 'Round-Up Deposit',       type: 'deposit'  as const },
+  { amount:  1.25, timestamp: new Date(_DEMO_EPOCH - 14*_DAY).toISOString(), title: 'Round-Up Deposit',       type: 'deposit'  as const },
+  { amount:  0.75, timestamp: new Date(_DEMO_EPOCH -  6*_DAY).toISOString(), title: 'Round-Up Deposit',       type: 'deposit'  as const },
+];
+
+const DEMO_YIELD_EARNED = 1.24;  // ~4.2% APY on ~$23 avg balance over 32 days
 
 export default function App() {
+  // Intro animation
+  const [showIntro, setShowIntro] = useState(true);
+  const [introFading, setIntroFading] = useState(false);
+  const introStartRef = useRef(Date.now());
+
   // Navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'merchant' | 'settings' | 'vault'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'merchant' | 'settings'>('dashboard');
 
   // Wallet State
   const [wallet, setWallet] = useState<WalletDetails | null>(null);
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
   const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string; vaultUsdc: string; vaultShares: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00', vaultUsdc: '0.00', vaultShares: '0.00' });
   const [copiedText, setCopiedText] = useState<string>('');
-  const [showAccountDetails, setShowAccountDetails] = useState<boolean>(false);
-
-  // Vault Monitor State
-  const [vaultDetails, setVaultDetails] = useState<VaultDetailsData | null>(null);
   const [isRefreshingBalances, setIsRefreshingBalances] = useState<boolean>(false);
-  const [hoveredYieldIndex, setHoveredYieldIndex] = useState<number | null>(null);
-  const [hoveredActivityIndex, setHoveredActivityIndex] = useState<number | null>(null);
+  const [walletDetailsOpen, setWalletDetailsOpen] = useState<boolean>(false);
 
   // Settings State
   const [oinkPolicyEnabled, setOinkPolicyEnabled] = useState<boolean>(() => {
@@ -70,12 +105,7 @@ export default function App() {
     return localStorage.getItem('oink_policy') || 'nearest-1';
   });
   const [vaultAddress, setVaultAddress] = useState<string>(() => {
-    const saved = localStorage.getItem('oink_vault_address');
-    if (saved === "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db") {
-      localStorage.setItem('oink_vault_address', DEFAULT_VAULT_ADDRESS);
-      return DEFAULT_VAULT_ADDRESS;
-    }
-    return saved || DEFAULT_VAULT_ADDRESS;
+    return localStorage.getItem('oink_vault_address') || DEFAULT_VAULT_ADDRESS;
   });
 
   // Merchant State
@@ -172,6 +202,20 @@ export default function App() {
     localStorage.setItem('oink_transactions', JSON.stringify(transactions));
   }, [transactions]);
 
+  // Dismiss intro after wallet loads (minimum 2.4s so the animation feels satisfying)
+  useEffect(() => {
+    if (!loadingWallet) {
+      const elapsed = Date.now() - introStartRef.current;
+      const minDuration = 2400;
+      const remaining = Math.max(0, minDuration - elapsed);
+      const timer = setTimeout(() => {
+        setIntroFading(true);
+        setTimeout(() => setShowIntro(false), 700);
+      }, remaining);
+      return () => clearTimeout(timer);
+    }
+  }, [loadingWallet]);
+
   const loadWallet = async (pkey: string) => {
     setLoadingWallet(true);
     const details = await initBiconomyAccount(pkey);
@@ -181,15 +225,16 @@ export default function App() {
     const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated);
     setBalances(bal);
     setLoadingWallet(false);
-
-    // Fetch vault details
-    const vaultDet = await fetchVaultDetails(details.isSimulated);
-    setVaultDetails(vaultDet);
   };
 
   const handleResetWallet = async () => {
-    if (window.confirm("Are you sure you want to generate a new EOA? Your old private key will be reset.")) {
+    if (window.confirm("Are you sure you want to generate a new mock EOA? Your old private key and local balances will be reset.")) {
       const newPkey = resetEOA();
+      localStorage.removeItem('oink_mock_eth');
+      localStorage.removeItem('oink_mock_usdc');
+      localStorage.setItem('oink_vault_balance', '24.50');
+      localStorage.setItem('oink_vault_shares', '24.50');
+      setBalances(prev => ({ ...prev, vaultUsdc: '24.50', vaultShares: '24.50' }));
       await loadWallet(newPkey);
     }
   };
@@ -200,6 +245,11 @@ export default function App() {
       const cleanKey = pkey.trim();
       if (/^0x[a-fA-F0-9]{64}$/.test(cleanKey)) {
         localStorage.setItem("oink_eoa_private_key", cleanKey);
+        localStorage.removeItem('oink_mock_eth');
+        localStorage.removeItem('oink_mock_usdc');
+        localStorage.setItem('oink_vault_balance', '0.00');
+        localStorage.setItem('oink_vault_shares', '0.00');
+        setBalances(prev => ({ ...prev, vaultUsdc: '0.00', vaultShares: '0.00' }));
         await loadWallet(cleanKey);
       } else {
         alert("Invalid private key format! It must be a 64-character hex string starting with 0x.");
@@ -210,13 +260,8 @@ export default function App() {
   const handleRefreshBalances = async () => {
     if (!wallet) return;
     setIsRefreshingBalances(true);
-
     const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
     setBalances(bal);
-
-    const vaultDet = await fetchVaultDetails(wallet.isSimulated);
-    setVaultDetails(vaultDet);
-
     setIsRefreshingBalances(false);
   };
 
@@ -259,11 +304,11 @@ export default function App() {
 
   const handlePayClick = () => {
     if (checkoutPrice <= 0) return;
-
+    
     // Check if user has enough USDC in their owner EOA signer wallet
     const userUsdc = parseFloat(balances.eoaUsdc);
     const requiredTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
-
+    
     if (userUsdc < requiredTotal) {
       alert(`Insufficient USDC balance! You have $${userUsdc.toFixed(2)} but this transaction requires $${requiredTotal.toFixed(2)}.`);
       return;
@@ -272,81 +317,110 @@ export default function App() {
     setCheckoutStep('confirm');
   };
 
-  const handleConfirmOink = async () => {
+  const handleConfirmOink = () => {
     setCheckoutStep('sending');
     const finalRoundup = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutRoundup : 0;
     const finalTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
+    executeMockTransaction(checkoutPrice, finalRoundup, finalTotal);
+  };
 
-    if (!wallet) {
-      alert("No wallet connected!");
-      setCheckoutStep('idle');
-      return;
+  const executeMockTransaction = async (price: number, roundup: number, total: number) => {
+    let txHash = "";
+
+    if (wallet && !wallet.isSimulated) {
+      try {
+        // Run real transaction on-chain via EOA -> Smart Account -> Merchant + Vault
+        txHash = await executeOinkPayment(
+          wallet.privateKey,
+          wallet.smartAccountAddress,
+          MERCHANT_ADDRESS,
+          price,
+          roundup,
+          vaultAddress
+        );
+
+        // Refresh actual balances from blockchain
+        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
+        setBalances(bal);
+      } catch (err: any) {
+        console.error("On-chain transaction execution failed:", err);
+        alert(`Transaction failed: ${err.message || err}`);
+        setCheckoutStep('idle');
+        return;
+      }
+    } else {
+      // Simulate smart account txn signature & execution delay
+      await new Promise(r => setTimeout(r, 2200));
+
+      // Deduct USDC balance from owner EOA
+      const currentEoaUsdc = parseFloat(balances.eoaUsdc);
+      const newEoaUsdc = (currentEoaUsdc - total).toFixed(2);
+      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
+
+      // If Oink is enabled, add to vault
+      let newVaultUsdc = balances.vaultUsdc;
+      let newVaultShares = balances.vaultShares;
+      if (oinkPolicyEnabled && roundup > 0) {
+        const newVault = parseFloat(balances.vaultUsdc) + roundup;
+        newVaultUsdc = newVault.toFixed(2);
+        localStorage.setItem('oink_vault_balance', newVaultUsdc);
+
+        const newShares = parseFloat(balances.vaultShares) + roundup;
+        newVaultShares = newShares.toFixed(2);
+        localStorage.setItem('oink_vault_shares', newVaultShares);
+      }
+
+      // Update state balance
+      setBalances(prev => ({
+        ...prev,
+        eoaUsdc: newEoaUsdc,
+        vaultUsdc: newVaultUsdc,
+        vaultShares: newVaultShares
+      }));
+
+      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     }
 
-    try {
-      // Run real transaction on-chain via EOA -> Smart Account -> Merchant + Vault
-      const txHash = await executeOinkPayment(
-        wallet.privateKey,
-        wallet.smartAccountAddress,
-        MERCHANT_ADDRESS,
-        checkoutPrice,
-        finalRoundup,
-        vaultAddress
-      );
+    // Add transactions to history
+    const mainTx: Transaction = {
+      id: `tx-m-${Date.now()}`,
+      type: 'purchase',
+      title: selectedItem ? `${selectedItem.name} Purchase` : 'Merchant Payment',
+      amount: price,
+      roundup: roundup,
+      timestamp: new Date().toISOString(),
+      status: 'success',
+      txHash: txHash
+    };
 
-      // Refresh actual balances from blockchain
-      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
-      setBalances(bal);
+    let newTxs = [mainTx];
 
-      // Fetch updated vault details
-      const vaultDet = await fetchVaultDetails(wallet.isSimulated);
-      setVaultDetails(vaultDet);
-
-      // Add transactions to history
-      const mainTx: Transaction = {
-        id: `tx-m-${Date.now()}`,
-        type: 'purchase',
-        title: selectedItem ? `${selectedItem.name} Purchase` : 'Merchant Payment',
-        amount: checkoutPrice,
-        roundup: finalRoundup,
+    if (oinkPolicyEnabled && roundup > 0) {
+      const savingsTx: Transaction = {
+        id: `tx-s-${Date.now()}`,
+        type: 'savings',
+        title: 'Oink Round-Up Savings',
+        amount: roundup,
+        roundup: 0,
         timestamp: new Date().toISOString(),
         status: 'success',
         txHash: txHash
       };
-
-      let newTxs = [mainTx];
-
-      if (oinkPolicyEnabled && finalRoundup > 0) {
-        const savingsTx: Transaction = {
-          id: `tx-s-${Date.now()}`,
-          type: 'savings',
-          title: 'Oink Round-Up Savings',
-          amount: finalRoundup,
-          roundup: 0,
-          timestamp: new Date().toISOString(),
-          status: 'success',
-          txHash: txHash
-        };
-        newTxs.push(savingsTx);
-      }
-
-      setTransactions(prev => [...newTxs, ...prev]);
-      setActiveTxResult({
-        merchantAmount: checkoutPrice,
-        roundupAmount: finalRoundup,
-        totalAmount: finalTotal,
-        txHash: txHash
-      });
-      setCheckoutStep('success');
-
-      // Clean selections
-      setSelectedItem(null);
-      setCustomAmount('');
-    } catch (err: any) {
-      console.error("On-chain transaction execution failed:", err);
-      alert(`Transaction failed: ${err.message || err}`);
-      setCheckoutStep('idle');
+      newTxs.push(savingsTx);
     }
+
+    setTransactions(prev => [...newTxs, ...prev]);
+    setActiveTxResult({
+      merchantAmount: price,
+      roundupAmount: roundup,
+      totalAmount: total,
+      txHash: txHash
+    });
+    setCheckoutStep('success');
+
+    // Clean selections
+    setSelectedItem(null);
+    setCustomAmount('');
   };
 
   const handleWithdrawClick = async () => {
@@ -355,7 +429,7 @@ export default function App() {
       alert("Please enter a valid amount of USDC to withdraw.");
       return;
     }
-
+    
     const available = parseFloat(balances.vaultUsdc);
     if (amount > available) {
       alert(`Insufficient savings in OinkVault! You can withdraw up to $${available.toFixed(2)} USDC.`);
@@ -363,145 +437,185 @@ export default function App() {
     }
 
     setWithdrawStep('confirm');
-
+    
     // Preview the shares to burn
-    if (wallet) {
+    if (wallet && !wallet.isSimulated) {
       const shares = await previewWithdrawShares(vaultAddress, amount);
       setWithdrawSharesPreview(shares);
+    } else {
+      // 1:1 in simulation
+      setWithdrawSharesPreview(amount.toFixed(2));
     }
   };
 
   const handleConfirmWithdraw = async () => {
     setWithdrawStep('sending');
     const amount = parseFloat(withdrawAmount);
+    let txHash = "";
 
-    if (!wallet) {
-      alert("No wallet connected!");
-      setWithdrawStep('idle');
-      return;
-    }
+    if (wallet && !wallet.isSimulated) {
+      try {
+        txHash = await executeOinkWithdraw(
+          wallet.privateKey,
+          wallet.smartAccountAddress,
+          vaultAddress,
+          amount
+        );
 
-    try {
-      const txHash = await executeOinkWithdraw(
-        wallet.privateKey,
-        wallet.smartAccountAddress,
-        vaultAddress,
-        amount
-      );
-
-      // Fetch updated balances
-      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
-      setBalances(bal);
-
-      // Fetch updated vault details
-      const vaultDet = await fetchVaultDetails(wallet.isSimulated);
-      setVaultDetails(vaultDet);
-
-      // Add withdrawal to transaction history
-      const withdrawTx: Transaction = {
-        id: `tx-w-${Date.now()}`,
-        type: 'savings',
-        title: 'Oink Vault Savings Withdrawal',
-        amount: amount,
-        roundup: 0,
-        timestamp: new Date().toISOString(),
-        status: 'success',
-        txHash: txHash
-      };
-
-      setTransactions(prev => [withdrawTx, ...prev]);
-      setActiveWithdrawHash(txHash);
-      setWithdrawStep('success');
-    } catch (err: any) {
-      console.error("On-chain withdrawal failed:", err);
-      alert(`Withdrawal failed: ${err.message || err}`);
-      setWithdrawStep('idle');
-    }
-  };
-
-  // 1. Interpolated Yield Gains data over the past 24 hours
-  const yieldHistory = Array.from({ length: 24 }, (_, i) => {
-    const hour = 23 - i;
-    const date = new Date(Date.now() - hour * 3600 * 1000);
-    const hourStr = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
-    const currentPrice = vaultDetails ? parseFloat(vaultDetails.sharePrice) : 1.0294;
-    const startPrice = 1.0000;
-
-    // Smooth compounding curve with a little organic drift
-    const progress = i / 23;
-    const curve = Math.sin(progress * Math.PI * 0.5) * 0.95 + progress * 0.05;
-    const price = startPrice + (currentPrice - startPrice) * curve;
-
-    const supply = vaultDetails ? parseFloat(vaultDetails.totalSupply) : 1380.00;
-    const yieldEarned = (price - 1.0000) * supply;
-
-    return {
-      date: hourStr,
-      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + hourStr,
-      sharePrice: price.toFixed(4),
-      yieldEarned: Math.max(0, yieldEarned).toFixed(2),
-      percentage: ((price - 1.0000) * 100).toFixed(2)
-    };
-  });
-
-  // 2. Hybrid mock/real Vault activity history over the past 24 hours
-  const activityHistory = Array.from({ length: 24 }, (_, i) => {
-    const hour = 23 - i;
-    const date = new Date(Date.now() - hour * 3600 * 1000);
-    const hourStr = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
-    const startOfHour = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), 0, 0, 0).getTime();
-    const endOfHour = startOfHour + 3600 * 1000;
-
-    let deposits = 0;
-    let withdrawals = 0;
-
-    transactions.forEach(tx => {
-      const txTime = new Date(tx.timestamp).getTime();
-      if (txTime >= startOfHour && txTime < endOfHour && tx.status === 'success') {
-        if (tx.type === 'savings') {
-          if (tx.title.includes('Withdrawal')) {
-            withdrawals += tx.amount;
-          } else {
-            deposits += tx.amount;
-          }
-        }
+        // Fetch updated balances
+        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
+        setBalances(bal);
+      } catch (err: any) {
+        console.error("On-chain withdrawal failed:", err);
+        alert(`Withdrawal failed: ${err.message || err}`);
+        setWithdrawStep('idle');
+        return;
       }
-    });
+    } else {
+      // Mock withdrawal simulation
+      await new Promise(r => setTimeout(r, 2200));
 
-    return {
-      date: hourStr,
-      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + hourStr,
-      deposits: parseFloat(deposits.toFixed(2)),
-      withdrawals: parseFloat(withdrawals.toFixed(2))
+      const mockVaultBalance = parseFloat(balances.vaultUsdc);
+      const mockVaultShares = parseFloat(balances.vaultShares);
+      const mockEoaUsdc = parseFloat(balances.eoaUsdc);
+
+      const newVaultUsdc = (mockVaultBalance - amount).toFixed(2);
+      const newVaultShares = (mockVaultShares - amount).toFixed(2);
+      const newEoaUsdc = (mockEoaUsdc + amount).toFixed(2);
+
+      localStorage.setItem('oink_vault_balance', newVaultUsdc);
+      localStorage.setItem('oink_vault_shares', newVaultShares);
+      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
+
+      setBalances(prev => ({
+        ...prev,
+        vaultUsdc: newVaultUsdc,
+        vaultShares: newVaultShares,
+        eoaUsdc: newEoaUsdc
+      }));
+
+      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    }
+
+    // Add withdrawal to transaction history
+    const withdrawTx: Transaction = {
+      id: `tx-w-${Date.now()}`,
+      type: 'savings',
+      title: 'Oink Vault Savings Withdrawal',
+      amount: amount,
+      roundup: 0,
+      timestamp: new Date().toISOString(),
+      status: 'success',
+      txHash: txHash
     };
-  });
 
-  // Yield Gains chart helper variables
-  const prices = yieldHistory.map(d => parseFloat(d.sharePrice));
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const priceRange = maxPrice - minPrice || 0.01;
-  const yMin = Math.max(1.0, minPrice - priceRange * 0.15);
-  const yMax = maxPrice + priceRange * 0.15;
-
-  const getLinePath = () => {
-    return yieldHistory.map((d, index) => {
-      const x = (index / (yieldHistory.length - 1)) * 500;
-      const y = 170 - ((parseFloat(d.sharePrice) - yMin) / (yMax - yMin)) * 140;
-      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-    }).join(' ');
+    setTransactions(prev => [withdrawTx, ...prev]);
+    setActiveWithdrawHash(txHash);
+    setWithdrawStep('success');
   };
 
-  const getAreaPath = () => {
-    const linePath = getLinePath();
-    if (!linePath) return '';
-    return `${linePath} L 500 170 L 0 170 Z`;
-  };
+  // Vault balance for seeded chart calculations
+  const vaultBalance = parseFloat(balances.vaultUsdc) || 0;
 
-  const maxVolume = Math.max(...activityHistory.map(d => Math.max(d.deposits, d.withdrawals)), 4.0);
+  // Use actual vault balance for chart scaling; fall back to demo seed (24.50) so the
+  // sparkline is always visible even on a fresh wallet with no deposits yet.
+  const chartBase = vaultBalance > 0 ? vaultBalance : 24.50;
+  const yieldHistory = [
+    { t: _DEMO_EPOCH - 32*_DAY, v: chartBase * 0.840 },
+    { t: _DEMO_EPOCH - 26*_DAY, v: chartBase * 0.872 },
+    { t: _DEMO_EPOCH - 20*_DAY, v: chartBase * 0.897 },
+    { t: _DEMO_EPOCH - 15*_DAY, v: chartBase * 0.921 },
+    { t: _DEMO_EPOCH - 10*_DAY, v: chartBase * 0.946 },
+    { t: _DEMO_EPOCH -  6*_DAY, v: chartBase * 0.966 },
+    { t: _DEMO_EPOCH -  3*_DAY, v: chartBase * 0.984 },
+    { t: _DEMO_EPOCH,            v: chartBase },
+  ];
+
+  // Merge seeded events + real savings transactions, newest first
+  const allVaultEvents = [
+    ...SEEDED_VAULT_EVENTS,
+    ...transactions
+      .filter(tx => tx.type === 'savings')
+      .map(tx => ({ amount: tx.amount, timestamp: tx.timestamp, title: tx.title, type: 'deposit' as const }))
+  ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const renderYieldSparkline = () => {
+    const pts = yieldHistory;
+    if (pts.length < 2) return null;
+    const W = 120, H = 40;
+    const minT = pts[0].t, maxT = pts[pts.length - 1].t;
+    const minV = Math.min(...pts.map(p => p.v));
+    const maxV = Math.max(...pts.map(p => p.v));
+    const vRange = maxV - minV || 1;
+    const toX = (t: number) => ((t - minT) / (maxT - minT)) * W;
+    const toY = (v: number) => H - 2 - ((v - minV) / vRange) * (H - 6);
+    const linePts = pts.map(p => `${toX(p.t)},${toY(p.v)}`).join(' ');
+    const fillPts = `${toX(minT)},${H} ${linePts} ${toX(maxT)},${H}`;
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ width: '120px', height: '40px', display: 'block', flexShrink: 0 }}>
+        <defs>
+          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(16,185,129,0.22)" />
+            <stop offset="100%" stopColor="rgba(16,185,129,0)" />
+          </linearGradient>
+        </defs>
+        <polygon points={fillPts} fill="url(#sparkGrad)" />
+        <polyline points={linePts} fill="none" stroke="#10b981" strokeWidth="2.5"
+          strokeLinejoin="round" strokeLinecap="round" />
+      </svg>
+    );
+  };
 
   return (
     <div className="app-container">
+
+      {/* Opening coin/cash animation */}
+      {showIntro && (
+        <div className={`intro-overlay${introFading ? ' fading' : ''}`}>
+          <div className="intro-coin-field">
+            {INTRO_ELEMENTS.map((el, i) =>
+              el.type === 'coin' ? (
+                <div
+                  key={i}
+                  className="intro-coin"
+                  style={{
+                    left: el.left,
+                    width: el.size,
+                    height: el.size,
+                    '--delay': el.delay,
+                    '--dur': el.dur,
+                    '--rot-s': el.rotS,
+                    '--rot-e': el.rotE,
+                  } as React.CSSProperties}
+                />
+              ) : (
+                <div
+                  key={i}
+                  className="intro-bill"
+                  style={{
+                    left: el.left,
+                    width: el.w,
+                    height: el.h,
+                    '--delay': el.delay,
+                    '--dur': el.dur,
+                    '--rot-s': el.rotS,
+                    '--rot-e': el.rotE,
+                  } as React.CSSProperties}
+                />
+              )
+            )}
+          </div>
+          <div className="intro-center">
+            <img src="/piggybank_logo.png" alt="Oink" className="intro-wallet-icon" />
+            <div className="intro-text">
+              <h2>Setting up your Oink wallet</h2>
+              <p>One moment while we get everything ready</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar Navigation */}
       <aside className="sidebar">
         <a href="#" className="sidebar-logo" onClick={() => setActiveTab('dashboard')}>
@@ -515,7 +629,7 @@ export default function App() {
             onClick={() => setActiveTab('dashboard')}
           >
             <WalletIcon size={20} />
-            <span>Smart Wallet</span>
+            <span>Dashboard</span>
           </div>
 
           <div
@@ -523,15 +637,7 @@ export default function App() {
             onClick={() => setActiveTab('merchant')}
           >
             <ShoppingBag size={20} />
-            <span>Merchants</span>
-          </div>
-
-          <div
-            className={`nav-link ${activeTab === 'vault' ? 'active' : ''}`}
-            onClick={() => setActiveTab('vault')}
-          >
-            <TrendingUp size={20} />
-            <span>Dashboard</span>
+            <span>Merchant</span>
           </div>
 
           <div
@@ -539,7 +645,7 @@ export default function App() {
             onClick={() => setActiveTab('settings')}
           >
             <SettingsIcon size={20} />
-            <span>Oink Settings</span>
+            <span>Settings</span>
           </div>
         </nav>
 
@@ -560,34 +666,28 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <>
                 <h1>Oink Smart Wallet</h1>
-                <p>Track your balances, smart account details, and automatic round-up savings.</p>
+                <p>See your wallet, balances, and round-up savings all in one place.</p>
               </>
             )}
             {activeTab === 'merchant' && (
               <>
-                <h1>Merchant Sandbox</h1>
-                <p>Simulate point-of-sale payments to test your Oink round-up policy.</p>
+                <h1>Merchant Checkout</h1>
+                <p>Process a sample transaction and see how round-up savings are applied in real time.</p>
               </>
             )}
             {activeTab === 'settings' && (
               <>
-                <h1>Configure Oink</h1>
-                <p>Customize how your spare change is routed to your Oink savings vault.</p>
-              </>
-            )}
-            {activeTab === 'vault' && (
-              <>
-                <h1>OinkVault Analytics</h1>
-                <p>Monitor vault balance, share price, yield growth, and transaction activity.</p>
+                <h1>Settings</h1>
+                <p>Choose how Oink rounds up your purchases and grows your savings.</p>
               </>
             )}
           </div>
 
           <div className="header-actions">
             {wallet && (
-              <div className="connection-pill connected">
+              <div className={`connection-pill ${wallet.isSimulated ? '' : 'connected'}`}>
                 <span className="connection-dot"></span>
-                <span>Oink Smart Wallet</span>
+                <span>{wallet.isSimulated ? 'Demo Mode' : 'Connected'}</span>
               </div>
             )}
 
@@ -608,7 +708,7 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: '4rem 0' }}>
             <div className="spinner pink" style={{ width: '48px', height: '48px', borderWidth: '4px', marginBottom: '1.5rem' }}></div>
             <h3>Setting up Oink Smart Wallet...</h3>
-            <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Initializing secure transaction client</p>
+            <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Getting everything ready...</p>
           </div>
         ) : (
           <>
@@ -616,111 +716,101 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <div className="tab-content">
 
-                {/* Balances Section */}
-                <div className="balance-card-grid">
-                  <div className="glass-card glow-pink">
-                    <div className="balance-item">
-                      <div className="balance-header">
-                        <span>Current Wallet Balance</span>
-                        <Coins size={18} color="#2775ca" />
-                      </div>
-                      <div className="balance-amount highlight-pink">
-                        ${parseFloat(balances.eoaUsdc).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>USDC</span>
-                      </div>
-                    </div>
+                {/* 1. Signing Wallet — minimal full-width bar */}
+                <div className="signing-wallet-topbar">
+                  <div className="signing-wallet-topbar-label">
+                    <Coins size={14} color="var(--primary)" />
+                    <span>Current Balance</span>
                   </div>
-
-                  <div className="glass-card glow-pink">
-                    <div className="balance-item">
-                      <div className="balance-header">
-                        <span>Current Oink Savings</span>
-                        <PiggyBank size={18} color="var(--secondary)" />
-                      </div>
-                      <div className="balance-amount highlight-pink">
-                        {parseFloat(balances.vaultShares).toFixed(2)} <span style={{ fontSize: '1rem', fontWeight: 500 }}>ybOINK</span>
-                      </div>
-                      <div className="balance-footer" style={{ marginBottom: '1rem' }}>
-                        Equivalent to ${parseFloat(balances.vaultUsdc).toFixed(2)} USDC on-chain
-                      </div>
-
-                      {/* Withdraw Action */}
-                      <div style={{ display: 'flex', gap: '0.5rem', borderTop: '1px solid var(--card-border)', paddingTop: '0.75rem', marginTop: 'auto' }}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="Withdraw USDC"
-                          className="custom-input pink"
-                          style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', height: '36px', width: '100%', margin: 0 }}
-                          value={withdrawAmount}
-                          onChange={(e) => setWithdrawAmount(e.target.value)}
-                        />
-                        <button
-                          className="btn btn-pink btn-sm"
-                          style={{ height: '36px', whiteSpace: 'nowrap', padding: '0 0.85rem' }}
-                          onClick={handleWithdrawClick}
-                          disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0}
-                        >
-                          Withdraw
-                        </button>
-                      </div>
-                    </div>
+                  <div>
+                    <span className="signing-wallet-topbar-balance">${parseFloat(balances.eoaUsdc).toFixed(2)}</span>
+                    <span className="signing-wallet-topbar-unit">USDC</span>
                   </div>
                 </div>
 
-                {/* Activity History Section */}
-                <div style={{ marginTop: '1.5rem' }}>
-                  {/* Tx History */}
-                  <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Activity History</h3>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Latest updates</span>
+                {/* 2. Oink Vault Savings — hero, full width */}
+                  <div className="glass-card glow-pink vault-hero-card">
+                    <div className="vault-hero-header">
+                      <div className="vault-hero-label">
+                        <PiggyBank size={16} color="var(--secondary)" />
+                        <span>Oink Vault Savings</span>
+                      </div>
+                      <span className="apy-badge">
+                        <ArrowUpRight size={12} />
+                        Earning 4.2% APY
+                      </span>
                     </div>
 
-                    <div className="tx-list">
-                      {transactions.length === 0 ? (
-                        <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-                          No transactions recorded yet.
-                        </div>
-                      ) : (
-                        transactions.map((tx) => (
-                          <div key={tx.id} className="tx-item">
-                            <div className="tx-icon-details">
-                              <div className={`tx-icon-wrapper ${tx.type}`}>
-                                {tx.type === 'purchase' ? <ShoppingBag size={16} /> : <PiggyBank size={16} />}
-                              </div>
-                              <div className="tx-meta">
-                                <span className="tx-title">{tx.title}</span>
-                                <span className="tx-time">
-                                  {new Date(tx.timestamp).toLocaleString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="tx-amounts">
-                              <span className="tx-value">
-                                {tx.type === 'purchase' ? '-' : '+'}${tx.amount.toFixed(2)}
-                              </span>
-                              {tx.type === 'purchase' && tx.roundup > 0 && (
-                                <span className="tx-roundup-tag">
-                                  🐖 +${tx.roundup.toFixed(2)} Saved
-                                </span>
-                              )}
-                            </div>
+                    <div className="vault-hero-amount">
+                      {parseFloat(balances.vaultShares).toFixed(2)}
+                      <span className="vault-hero-unit">ybOINK</span>
+                    </div>
+                    <div className="vault-hero-usdc">≈ ${parseFloat(balances.vaultUsdc).toFixed(2)} USDC on-chain</div>
+
+                    <div className="vault-withdraw-row">
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="USDC amount to withdraw"
+                        className="custom-input pink"
+                        value={withdrawAmount}
+                        onChange={(e) => setWithdrawAmount(e.target.value)}
+                      />
+                      <button
+                        className="btn btn-pink btn-sm"
+                        onClick={handleWithdrawClick}
+                        disabled={!withdrawAmount || parseFloat(withdrawAmount) <= 0}
+                      >
+                        Withdraw
+                      </button>
+                    </div>
+
+                    <div className="vault-bottom-grid">
+
+                      {/* Yield Gains Growth — compact sparkline stat */}
+                      <div className="vault-yield-section">
+                        <div className="vault-chart-label">Yield Gains Growth</div>
+                        <div className="yield-stat-row">
+                          <div>
+                            <div className="yield-earned-amount">+${DEMO_YIELD_EARNED.toFixed(2)}</div>
+                            <div className="yield-earned-sub">earned · 32d @ 4.2% APY</div>
                           </div>
-                        ))
-                      )}
+                          {renderYieldSparkline()}
+                        </div>
+                        <div className="yield-period-stat">
+                          <ArrowUpRight size={11} />
+                          +{((DEMO_YIELD_EARNED / Math.max(vaultBalance - DEMO_YIELD_EARNED, 1)) * 100).toFixed(1)}% total return
+                        </div>
+                      </div>
+
+                      {/* Vault Activity History — event list */}
+                      <div className="vault-activity-section">
+                        <div className="vault-chart-label">Vault Activity</div>
+                        <div className="vault-activity-list">
+                          {allVaultEvents.slice(0, 5).map((event, i) => (
+                            <div key={i} className="vault-activity-item">
+                              <div className={`vault-activity-dot ${event.type}`} />
+                              <div className="vault-activity-meta">
+                                <span className="vault-activity-title">{event.title}</span>
+                                <span className="vault-activity-date">
+                                  {new Date(event.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                </span>
+                              </div>
+                              <span className={`vault-activity-amount${ (event.type as string) === 'withdrawal' ? ' withdrawal' : ''}`}>
+                                {(event.type as string) === 'withdrawal' ? '-' : '+'}${event.amount.toFixed(2)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
                     </div>
                   </div>
 
-                </div>
 
                 {/* Account Details Card */}
                 <div className="glass-card glow-primary wallet-conn-card" style={{ marginTop: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem', marginBottom: showAccountDetails ? '1.5rem' : '0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem', marginBottom: walletDetailsOpen ? '1.5rem' : '0' }}>
                     <div>
                       <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.4rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <ShieldCheck color="var(--primary)" size={24} />
@@ -738,18 +828,18 @@ export default function App() {
                       <button className="btn btn-secondary btn-sm btn-danger" onClick={handleResetWallet}>
                         Reset Key
                       </button>
-                      <button 
-                        className="btn btn-secondary btn-sm" 
+                      <button
+                        className="btn btn-secondary btn-sm"
                         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: 0, minWidth: '32px' }}
-                        onClick={() => setShowAccountDetails(!showAccountDetails)}
-                        title={showAccountDetails ? "Hide Wallet Details" : "Show Wallet Details"}
+                        onClick={() => setWalletDetailsOpen(!walletDetailsOpen)}
+                        title={walletDetailsOpen ? 'Hide Wallet Details' : 'Show Wallet Details'}
                       >
-                        {showAccountDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        {walletDetailsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </button>
                     </div>
                   </div>
 
-                  {showAccountDetails && (
+                  {walletDetailsOpen && (
                     <div className="wallet-connected-grid" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
                       <div className="wallet-details">
                         <div className="detail-row">
@@ -807,11 +897,11 @@ export default function App() {
                       <div className="merchant-logo">☕</div>
                       <div className="merchant-title">
                         <h2>Cafe Oink & Bakery</h2>
-                        <p>Simulated Point of Sale (POS) terminal</p>
+                        <p>Sample merchant checkout</p>
                       </div>
                     </div>
 
-                    <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '1rem', color: 'var(--text)' }}>Select an Item to Purchase</h3>
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: 600, marginBottom: '1rem', color: 'var(--text)' }}>Select an Item</h3>
 
                     <div className="store-grid">
                       {storeItems.map((item) => (
@@ -836,7 +926,7 @@ export default function App() {
                     <div style={{ margin: '1.5rem 0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
                         <span style={{ height: '1px', background: 'var(--card-border)', flex: 1 }}></span>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-dark)', fontWeight: 600 }}>OR ENTER CUSTOM AMOUNT</span>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-dark)', fontWeight: 600 }}>OR ENTER A CUSTOM AMOUNT</span>
                         <span style={{ height: '1px', background: 'var(--card-border)', flex: 1 }}></span>
                       </div>
 
@@ -859,12 +949,12 @@ export default function App() {
                   </div>
 
                   {/* Summary & Checkout Actions */}
-                  <div className="checkout-summary" style={{ background: 'rgba(0, 0, 0, 0.15)', padding: '1.5rem', borderRadius: 'var(--radius-lg)', border: '1px solid var(--card-border)' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
+                  <div className="checkout-summary" style={{ background: 'rgba(255, 248, 251, 0.85)', padding: '1.5rem', borderRadius: 'var(--radius-lg)', border: '1px solid rgba(236, 72, 153, 0.1)' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.15rem', fontWeight: 700, marginBottom: '0.75rem', color: 'var(--text)' }}>
                       Order Summary
                     </h3>
 
-                    <div style={{ flex: 1 }}>
+                    <div>
                       {checkoutPrice > 0 ? (
                         <>
                           <div className="receipt-row">
@@ -875,27 +965,26 @@ export default function App() {
                           {oinkPolicyEnabled && checkoutRoundup > 0 ? (
                             <>
                               <div className="receipt-row" style={{ color: 'var(--secondary)' }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}>
-                                  <span>🐖 Oink Round-Up</span>
-                                  <span style={{ fontSize: '0.7rem', padding: '1px 5px', background: 'rgba(236,72,153,0.12)', borderRadius: '4px', textTransform: 'uppercase' }}>
-                                    {oinkPolicy.replace('nearest-', 'Nearest $')}
-                                  </span>
+                                <span style={{ fontWeight: 600 }}>🐖 Oink Round-Up</span>
+                                <span style={{ fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap' }}>+${checkoutRoundup.toFixed(2)} USDC</span>
+                              </div>
+                              <div style={{ marginTop: '-0.35rem', marginBottom: '0.25rem' }}>
+                                <span style={{ display: 'inline-block', fontSize: '0.7rem', padding: '1px 5px', background: 'rgba(236,72,153,0.12)', borderRadius: '4px', textTransform: 'uppercase', color: 'var(--secondary)', fontWeight: 500 }}>
+                                  {oinkPolicy.replace('nearest-', 'Nearest $')}
                                 </span>
-                                <span style={{ fontWeight: 600 }}>+${checkoutRoundup.toFixed(2)} USDC</span>
                               </div>
 
-                              <div className="roundup-preview-alert">
-                                <PiggyBank className="icon" size={16} />
-                                <div className="roundup-preview-text">
-                                  <div className="roundup-preview-title">Round-up Active!</div>
-                                  Spare change of <strong>${checkoutRoundup.toFixed(2)} USDC</strong> will automatically route to your Oink Vault.
-                                </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--primary)', marginTop: '0.3rem', opacity: 0.8 }}>
+                                <PiggyBank size={13} style={{ flexShrink: 0 }} />
+                                <span>Spare change routes to your Oink Vault automatically.</span>
                               </div>
                             </>
                           ) : (
-                            <div className="receipt-row" style={{ color: 'var(--text-muted)', fontSize: '0.8rem', background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--card-border)', marginTop: '0.5rem' }}>
-                              <span>No round-up spare-change generated. (Oink policy is {oinkPolicyEnabled ? 'enabled' : 'disabled'}).</span>
-                            </div>
+                            <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.35rem' }}>
+                              {!oinkPolicyEnabled
+                                ? 'Round-ups are disabled.'
+                                : 'No round-up — amount is already a whole number.'}
+                            </p>
                           )}
 
                           <div className="receipt-row total">
@@ -904,15 +993,15 @@ export default function App() {
                           </div>
                         </>
                       ) : (
-                        <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-dark)', fontSize: '0.9rem' }}>
-                          Select an item or enter a custom price to check out.
+                        <div style={{ textAlign: 'center', padding: '2.5rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                          Select an item or enter a custom amount to begin checkout.
                         </div>
                       )}
                     </div>
 
                     <button
                       className="btn btn-pink btn-block"
-                      style={{ marginTop: 'auto' }}
+                      style={{ marginTop: '1.25rem' }}
                       disabled={checkoutPrice <= 0}
                       onClick={handlePayClick}
                     >
@@ -927,22 +1016,20 @@ export default function App() {
 
             {/* TAB: SETTINGS */}
             {activeTab === 'settings' && (
-              <div className="tab-content" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="tab-content">
+                <div className="glass-card settings-grid">
 
+                  {/* Left Column: Switch & Presets */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
+                      Oink Round-Up Rules
+                    </h3>
 
-
-                {/* Oink Round-Up Status Card */}
-                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Oink Round-Up Status</h3>
-                  <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
-
-                    {/* Status Toggle */}
-                    <div className="switch-control" style={{ flex: '1 1 300px', background: 'rgba(255,255,255,0.01)', margin: 0 }}>
+                    {/* Enable Toggle */}
+                    <div className="switch-control">
                       <div className="switch-label">
-                        <span className="switch-title">Auto-Savings Policy</span>
-                        <span className="switch-desc">
-                          {oinkPolicyEnabled ? 'Actively rounding up transactions' : 'Round-ups are currently suspended'}
-                        </span>
+                        <span className="switch-title" style={{ fontSize: '1.05rem' }}>Enable Automatic Round-ups</span>
+                        <span className="switch-desc">Automatically round up each USDC transaction and save the difference</span>
                       </div>
                       <label className="switch">
                         <input
@@ -953,34 +1040,6 @@ export default function App() {
                         <span className="slider pink"></span>
                       </label>
                     </div>
-
-                    {/* Active Policy Type display */}
-                    <div style={{ flex: '1 1 200px', padding: '1rem', background: 'rgba(0,0,0,0.15)', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>ACTIVE POLICY TYPE</div>
-                      <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)', textTransform: 'capitalize' }}>
-                        {oinkPolicy.replace('-', ' ')}
-                      </span>
-                    </div>
-
-                    {/* Round-Up Routing Info */}
-                    <div className="roundup-preview-alert" style={{ flex: '2 1 350px', margin: 0, background: 'rgba(139, 92, 246, 0.04)', borderColor: 'rgba(139, 92, 246, 0.15)', display: 'flex', alignItems: 'center' }}>
-                      <Info size={16} className="icon" style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                      <div className="roundup-preview-text">
-                        <div className="roundup-preview-title" style={{ color: 'var(--primary)' }}>Round-Up Routing</div>
-                        Your spare change transfers are batched atomically. No double signature required.
-                      </div>
-                    </div>
-
-                  </div>
-                </div>
-
-                <div className="glass-card settings-grid">
-
-                  {/* Left Column: Rules & Presets */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
-                      Oink Round-Up Rules
-                    </h3>
 
                     {/* Round-up Presets */}
                     <div className="form-group" style={{ opacity: oinkPolicyEnabled ? 1 : 0.5, pointerEvents: oinkPolicyEnabled ? 'auto' : 'none', transition: 'opacity 0.2s' }}>
@@ -1015,7 +1074,7 @@ export default function App() {
 
                     {/* Fixed Round-ups */}
                     <div className="form-group" style={{ opacity: oinkPolicyEnabled ? 1 : 0.5, pointerEvents: oinkPolicyEnabled ? 'auto' : 'none', transition: 'opacity 0.2s' }}>
-                      <label>Fixed Sparings Policy</label>
+                      <label>Fixed Add-On</label>
                       <div className="policy-options">
                         <div
                           className={`policy-card ${oinkPolicy === 'fixed-0.5' ? 'selected pink' : ''}`}
@@ -1043,8 +1102,8 @@ export default function App() {
 
                     <div className="form-group">
                       <label style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                        <span>Target Savings Vault (OinkVault)</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dark)' }}>Verified Contract</span>
+                        <span>Savings Vault</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dark)' }}>On-Chain</span>
                       </label>
                       <input
                         type="text"
@@ -1054,7 +1113,7 @@ export default function App() {
                         placeholder="0x..."
                       />
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                        This is the address of the OinkVault smart contract where your rounded-up USDC funds are held and earn yield.
+                        This is where your rounded-up savings go. Funds deposited here earn yield on-chain.
                       </p>
                     </div>
 
@@ -1064,8 +1123,7 @@ export default function App() {
                         How does Oink work?
                       </div>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                        Every time you perform a transaction with your Oink smart wallet, the contract calculates the spare change according to your active policy rules.
-                        It packages both your payment and the savings transfer into a single transaction batch, reducing gas overhead.
+                        Each time you pay with Oink, the round-up amount is calculated based on your chosen policy and routed to your savings vault in the same transaction — no separate approvals required.
                       </p>
                     </div>
                   </div>
@@ -1073,438 +1131,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
-            {/* TAB: VAULT MONITOR */}
-            {activeTab === 'vault' && (() => {
-              const lineTicks = [0, 6, 12, 18, 23];
-              const priceGridValues = [yMin, yMin + (yMax - yMin) / 2, yMax];
-              return (
-                <div className="tab-content">
-                  <div className="vault-panel">
-
-                    {/* Grid of stats */}
-                    <div className="vault-metrics-grid">
-
-                      {/* Metric 1: Total Assets */}
-                      <div className="glass-card vault-card highlighted">
-                        <div className="vault-card-title">
-                          <Coins size={16} color="var(--primary)" />
-                          Total Assets Under Management
-                        </div>
-                        <div className="vault-card-value">
-                          ${vaultDetails ? parseFloat(vaultDetails.totalAssets).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'} USDC
-                        </div>
-                        <div className="vault-card-desc">
-                          Total funds deposited in OinkVault (Cash + Yield)
-                        </div>
-
-                        <div className="allocation-bar-container">
-                          <div className="allocation-bar-labels">
-                            <span>Local Balance (Cash)</span>
-                            <span>Lending Pools (Yielding)</span>
-                          </div>
-                          <div className="allocation-bar">
-                            <div
-                              className="allocation-segment cash"
-                              style={{
-                                width: `${vaultDetails && parseFloat(vaultDetails.totalAssets) > 0
-                                  ? (parseFloat(vaultDetails.localBalance) / parseFloat(vaultDetails.totalAssets)) * 100
-                                  : 50}%`
-                              }}
-                            />
-                            <div
-                              className="allocation-segment allocated"
-                              style={{
-                                width: `${vaultDetails && parseFloat(vaultDetails.totalAssets) > 0
-                                  ? (parseFloat(vaultDetails.allocatedBalance) / parseFloat(vaultDetails.totalAssets)) * 100
-                                  : 50}%`
-                              }}
-                            />
-                          </div>
-                          <div className="allocation-legend">
-                            <div className="legend-item">
-                              <span className="legend-dot cash"></span>
-                              <span>Idle: ${vaultDetails ? parseFloat(vaultDetails.localBalance).toFixed(2) : '0.00'} USDC</span>
-                            </div>
-                            <div className="legend-item">
-                              <span className="legend-dot allocated"></span>
-                              <span>Yielding: ${vaultDetails ? parseFloat(vaultDetails.allocatedBalance).toFixed(2) : '0.00'} USDC</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Metric 2: Share Price */}
-                      <div className="glass-card vault-card">
-                        <div className="vault-card-title">
-                          <TrendingUp size={16} color="var(--primary)" />
-                          Vault Share Price (ybOINK)
-                        </div>
-                        <div className="vault-card-value">
-                          {vaultDetails ? parseFloat(vaultDetails.sharePrice).toFixed(4) : '1.0000'}
-                        </div>
-                        <div className="vault-card-desc">
-                          Exchange rate representing yield gains relative to USDC
-                        </div>
-
-                        {vaultDetails && parseFloat(vaultDetails.sharePrice) > 1.0 && (
-                          <div className="yield-badge">
-                            <span>📈</span>
-                            <span>+{((parseFloat(vaultDetails.sharePrice) - 1.0) * 100).toFixed(2)}% Cumulative yield gain</span>
-                          </div>
-                        )}
-                      </div>
-
-
-                    </div>
-
-                    {/* Grid of charts */}
-                    <div className="vault-charts-grid">
-
-                      {/* Chart 1: Yield Growth */}
-                      <div className="glass-card chart-card">
-                        <div className="chart-header">
-                          <div>
-                            <h3 className="chart-title">Yield Gains Growth</h3>
-                            <p className="chart-subtitle">Progressive increase of share value and compounding earnings (24h)</p>
-                          </div>
-                          <div className="legend-item" style={{ background: 'rgba(236, 72, 153, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}>
-                            <span className="legend-dot allocated"></span>
-                            <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>ybOINK Rate</span>
-                          </div>
-                        </div>
-
-                        <div className="chart-wrapper">
-                          {/* Tooltip Overlay */}
-                          {hoveredYieldIndex !== null && (
-                            <div
-                              className="chart-tooltip"
-                              style={{
-                                left: `${(hoveredYieldIndex / (yieldHistory.length - 1)) * 80}%`,
-                                top: '10px'
-                              }}
-                            >
-                              <div className="tooltip-date">{yieldHistory[hoveredYieldIndex].fullDate}</div>
-                              <div className="tooltip-row">
-                                <span className="tooltip-label">Share Price:</span>
-                                <span className="tooltip-val">{yieldHistory[hoveredYieldIndex].sharePrice} USDC</span>
-                              </div>
-                              <div className="tooltip-row">
-                                <span className="tooltip-label">Est. Earnings:</span>
-                                <span className="tooltip-val positive">+${yieldHistory[hoveredYieldIndex].yieldEarned} USDC</span>
-                              </div>
-                              <div className="tooltip-row">
-                                <span className="tooltip-label">ROI:</span>
-                                <span className="tooltip-val positive">+{yieldHistory[hoveredYieldIndex].percentage}%</span>
-                              </div>
-                            </div>
-                          )}
-
-                          <svg
-                            className="chart-svg"
-                            viewBox="0 0 500 200"
-                            preserveAspectRatio="none"
-                            onMouseMove={(e) => {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const x = e.clientX - rect.left;
-                              const svgWidth = rect.width;
-                              const index = Math.round((x / svgWidth) * (yieldHistory.length - 1));
-                              if (index >= 0 && index < yieldHistory.length) {
-                                setHoveredYieldIndex(index);
-                              }
-                            }}
-                            onMouseLeave={() => setHoveredYieldIndex(null)}
-                          >
-                            <defs>
-                              <linearGradient id="yieldAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.2" />
-                                <stop offset="100%" stopColor="var(--primary)" stopOpacity="0.0" />
-                              </linearGradient>
-                            </defs>
-
-                            {/* Grid Lines */}
-                            {priceGridValues.map((val, idx) => {
-                              const y = 170 - ((val - yMin) / (yMax - yMin)) * 140;
-                              return (
-                                <g key={`ygrid-${idx}`}>
-                                  <line
-                                    x1={0}
-                                    y1={y}
-                                    x2={500}
-                                    y2={y}
-                                    stroke="rgba(236, 72, 153, 0.08)"
-                                    strokeDasharray="2 2"
-                                  />
-                                  <text
-                                    x={5}
-                                    y={y - 4}
-                                    fontSize="9"
-                                    fill="var(--text-muted)"
-                                    fontWeight="500"
-                                  >
-                                    {val.toFixed(4)} USDC
-                                  </text>
-                                </g>
-                              );
-                            })}
-
-                            {lineTicks.map(idx => (
-                              <line
-                                key={`grid-${idx}`}
-                                x1={(idx / (yieldHistory.length - 1)) * 500}
-                                y1={30}
-                                x2={(idx / (yieldHistory.length - 1)) * 500}
-                                y2={170}
-                                stroke="rgba(236, 72, 153, 0.05)"
-                                strokeDasharray="4 4"
-                              />
-                            ))}
-
-                            {/* Area path */}
-                            <path
-                              d={getAreaPath()}
-                              fill="url(#yieldAreaGrad)"
-                              style={{ transition: 'all 0.3s ease' }}
-                            />
-
-                            {/* Line path */}
-                            <path
-                              d={getLinePath()}
-                              fill="none"
-                              stroke="var(--primary)"
-                              strokeWidth={2.5}
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              style={{ transition: 'all 0.3s ease' }}
-                            />
-
-                            {/* Interactive Hover Guides */}
-                            {hoveredYieldIndex !== null && (() => {
-                              const x = (hoveredYieldIndex / (yieldHistory.length - 1)) * 500;
-                              const y = 170 - ((parseFloat(yieldHistory[hoveredYieldIndex].sharePrice) - yMin) / (yMax - yMin)) * 140;
-                              return (
-                                <>
-                                  <line
-                                    x1={x}
-                                    y1={30}
-                                    x2={x}
-                                    y2={170}
-                                    stroke="var(--primary)"
-                                    strokeWidth={1.5}
-                                    strokeDasharray="3 3"
-                                  />
-                                  <circle
-                                    cx={x}
-                                    cy={y}
-                                    r={6}
-                                    fill="var(--primary)"
-                                    stroke="#ffffff"
-                                    strokeWidth={2}
-                                    style={{ filter: 'drop-shadow(0 0 4px var(--primary))' }}
-                                  />
-                                </>
-                              );
-                            })()}
-
-                            {/* X-axis Labels */}
-                            {lineTicks.map(idx => (
-                              <text
-                                key={`lbl-${idx}`}
-                                x={(idx / (yieldHistory.length - 1)) * 500}
-                                y={190}
-                                textAnchor="middle"
-                                fontSize="10"
-                                fill="var(--text-muted)"
-                              >
-                                {yieldHistory[idx].date}
-                              </text>
-                            ))}
-                          </svg>
-                        </div>
-                      </div>
-
-                      {/* Chart 2: Vault Activity */}
-                      <div className="glass-card chart-card">
-                        <div className="chart-header">
-                          <div>
-                            <h3 className="chart-title">Vault Activity History</h3>
-                            <p className="chart-subtitle">Hourly volume of deposits & withdrawals (24h)</p>
-                          </div>
-                          <div style={{ display: 'flex', gap: '0.75rem' }}>
-                            <div className="legend-item" style={{ fontSize: '0.75rem' }}>
-                              <span className="legend-dot cash" style={{ width: '8px', height: '8px' }}></span>
-                              <span>Deposits</span>
-                            </div>
-                            <div className="legend-item" style={{ fontSize: '0.75rem' }}>
-                              <span className="legend-dot" style={{ width: '8px', height: '8px', background: 'transparent', border: '1.5px solid var(--text-muted)', borderRadius: '50%' }}></span>
-                              <span>Withdrawals</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="chart-wrapper">
-                          {/* Tooltip Overlay */}
-                          {hoveredActivityIndex !== null && (
-                            <div
-                              className="chart-tooltip"
-                              style={{
-                                left: `${(hoveredActivityIndex / (activityHistory.length - 1)) * 75}%`,
-                                top: '10px'
-                              }}
-                            >
-                              <div className="tooltip-date">{activityHistory[hoveredActivityIndex].fullDate}</div>
-                              <div className="tooltip-row">
-                                <span className="tooltip-label">Deposits:</span>
-                                <span className="tooltip-val positive">+${activityHistory[hoveredActivityIndex].deposits.toFixed(2)} USDC</span>
-                              </div>
-                              <div className="tooltip-row">
-                                <span className="tooltip-label">Withdrawals:</span>
-                                <span className="tooltip-val negative">-${activityHistory[hoveredActivityIndex].withdrawals.toFixed(2)} USDC</span>
-                              </div>
-                            </div>
-                          )}
-
-                          <svg
-                            className="chart-svg"
-                            viewBox="0 0 500 200"
-                            preserveAspectRatio="none"
-                            onMouseMove={(e) => {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const x = e.clientX - rect.left;
-                              const svgWidth = rect.width;
-                              const index = Math.floor((x / svgWidth) * activityHistory.length);
-                              if (index >= 0 && index < activityHistory.length) {
-                                setHoveredActivityIndex(index);
-                              }
-                            }}
-                            onMouseLeave={() => setHoveredActivityIndex(null)}
-                          >
-                            {/* Grid Lines */}
-                            {[0, maxVolume / 2, maxVolume].map((val, idx) => {
-                              const y = 170 - (val / maxVolume) * 130;
-                              return (
-                                <g key={`actgrid-${idx}`}>
-                                  <line
-                                    x1={0}
-                                    y1={y}
-                                    x2={500}
-                                    y2={y}
-                                    stroke="rgba(236, 72, 153, 0.08)"
-                                    strokeDasharray="2 2"
-                                  />
-                                  {val > 0 && (
-                                    <text
-                                      x={5}
-                                      y={y - 4}
-                                      fontSize="9"
-                                      fill="var(--text-muted)"
-                                      fontWeight="500"
-                                    >
-                                      {val.toFixed(1)} USDC
-                                    </text>
-                                  )}
-                                </g>
-                              );
-                            })}
-
-                            {/* Hover Column Highlight */}
-                            {hoveredActivityIndex !== null && (() => {
-                              const slotW = 500 / activityHistory.length;
-                              const x = hoveredActivityIndex * slotW;
-                              return (
-                                <rect
-                                  x={x + 1}
-                                  y={30}
-                                  width={slotW - 2}
-                                  height={140}
-                                  fill="rgba(236, 72, 153, 0.04)"
-                                  rx={4}
-                                />
-                              );
-                            })()}
-
-                            {/* Bars */}
-                            {activityHistory.map((d, index) => {
-                              const slotW = 500 / activityHistory.length;
-                              const xCenter = index * slotW + slotW / 2;
-                              const barW = Math.max(3, slotW * 0.25);
-                              const xDep = xCenter - barW - 1;
-                              const xWith = xCenter + 1;
-                              const depH = (d.deposits / maxVolume) * 130;
-                              const withH = (d.withdrawals / maxVolume) * 130;
-                              const yDep = 170 - depH;
-                              const yWith = 170 - withH;
-                              const isHovered = hoveredActivityIndex === index;
-
-                              return (
-                                <g key={`activity-hour-${index}`}>
-                                  {/* Deposit Bar */}
-                                  {d.deposits > 0 && (
-                                    <rect
-                                      x={xDep}
-                                      y={yDep}
-                                      width={barW}
-                                      height={depH}
-                                      fill={isHovered ? "var(--primary)" : "var(--secondary)"}
-                                      rx={1.5}
-                                      style={{ transition: 'all 0.15s ease' }}
-                                    />
-                                  )}
-                                  {/* Withdrawal Bar */}
-                                  {d.withdrawals > 0 && (
-                                    <rect
-                                      x={xWith}
-                                      y={yWith}
-                                      width={barW}
-                                      height={withH}
-                                      fill="none"
-                                      stroke="var(--text-muted)"
-                                      strokeWidth={1.5}
-                                      rx={1.5}
-                                      style={{ transition: 'all 0.15s ease' }}
-                                    />
-                                  )}
-                                </g>
-                              );
-                            })}
-
-                            {/* X Axis Line */}
-                            <line
-                              x1={0}
-                              y1={170}
-                              x2={500}
-                              y2={170}
-                              stroke="rgba(236, 72, 153, 0.15)"
-                              strokeWidth={1.5}
-                            />
-
-                            {/* X-axis Labels */}
-                            {activityHistory.map((d, index) => {
-                              if (index % 6 !== 0 && index !== activityHistory.length - 1) return null;
-                              const slotW = 500 / activityHistory.length;
-                              return (
-                                <text
-                                  key={`actlbl-${index}`}
-                                  x={index * slotW + slotW / 2}
-                                  y={190}
-                                  textAnchor="middle"
-                                  fontSize="9"
-                                  fill="var(--text-muted)"
-                                >
-                                  {d.date}
-                                </text>
-                              );
-                            })}
-                          </svg>
-                        </div>
-                      </div>
-
-                    </div>
-
-                  </div>
-                </div>
-              );
-            })()}
           </>
         )}
       </main>
@@ -1557,11 +1183,11 @@ export default function App() {
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
                   {oinkPolicyEnabled && checkoutRoundup > 0 ? (
                     <>
-                      <strong>Batched Transaction:</strong> Both the merchant payment and your spare-change round-up split are executed in a single atomic transaction bundle.
+                      Your payment and round-up savings go through in one step — no extra approvals needed.
                     </>
                   ) : (
                     <>
-                      <strong>Smart Account Execution:</strong> Your merchant payment will be executed directly via your secure smart account contract with no round-up savings split.
+                      Your payment goes through your smart account — straightforward, no extras.
                     </>
                   )}
                 </p>
@@ -1587,15 +1213,15 @@ export default function App() {
             <div className="spinner pink" style={{ margin: '0 auto 1.5rem auto', width: '48px', height: '48px', borderWidth: '4px' }}></div>
 
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-              Executing transaction bundle...
+              Processing your payment...
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Batching transactions together</p>
-              <p>1. Approving USDC spending...</p>
-              <p>2. Initiating transfer to Merchant...</p>
-              <p>3. Rerouting spare-change to OinkVault...</p>
-              <p style={{ marginTop: '0.5rem', fontStyle: 'italic', fontSize: '0.75rem' }}>Awaiting signature & block inclusion...</p>
+              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Submitting transaction</p>
+              <p>1. Authorizing payment...</p>
+              <p>2. Sending to merchant...</p>
+              <p>3. Routing round-up to savings vault...</p>
+              <p style={{ marginTop: '0.5rem', fontStyle: 'italic', fontSize: '0.75rem' }}>Almost complete...</p>
             </div>
           </div>
         </div>
@@ -1630,7 +1256,7 @@ export default function App() {
 
                 {activeTxResult.roundupAmount > 0 && (
                   <div className="oink-receipt-row highlight">
-                    <span>Oink Vault Rerouted</span>
+                    <span>Oink Vault Deposit</span>
                     <span>+${activeTxResult.roundupAmount.toFixed(2)} USDC</span>
                   </div>
                 )}
@@ -1644,7 +1270,7 @@ export default function App() {
               <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.4rem', borderTop: '1px solid var(--card-border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>Success (Block Confirmed)</span>
+                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>Confirmed</span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
@@ -1720,7 +1346,7 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.12)', padding: '0.85rem', borderRadius: 'var(--radius-md)' }}>
                 <ShieldCheck size={20} color="var(--success)" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                  <strong>Direct Refund:</strong> The withdrawn USDC will be sent directly to your EOA signer wallet, and your ybOINK vault shares will be burned.
+                  Your USDC will be sent back to your signing wallet, and your vault shares will be redeemed.
                 </p>
               </div>
             </div>
@@ -1744,15 +1370,15 @@ export default function App() {
             <div className="spinner pink" style={{ margin: '0 auto 1.5rem auto', width: '48px', height: '48px', borderWidth: '4px' }}></div>
 
             <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.75rem' }}>
-              Executing Vault Withdrawal...
+              Processing withdrawal...
             </h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Executing via Smart Account</p>
-              <p>1. Preparing withdraw parameters...</p>
-              <p>2. Burning ybOINK vault shares...</p>
-              <p>3. Sending USDC to owner EOA...</p>
-              <p style={{ marginTop: '0.5rem', fontStyle: 'italic', fontSize: '0.75rem' }}>Awaiting signature & block inclusion...</p>
+              <p style={{ color: 'var(--text)', fontWeight: 500 }}>Submitting transaction</p>
+              <p>1. Calculating withdrawal amount...</p>
+              <p>2. Redeeming vault shares...</p>
+              <p>3. Transferring funds to your signing wallet...</p>
+              <p style={{ marginTop: '0.5rem', fontStyle: 'italic', fontSize: '0.75rem' }}>Almost complete...</p>
             </div>
           </div>
         </div>
@@ -1776,7 +1402,7 @@ export default function App() {
               </h3>
 
               <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', margin: '0.25rem 0' }}>
-                Your USDC savings have been withdrawn from OinkVault back to your EOA signer wallet.
+                Your savings have been redeemed from OinkVault and returned to your signing wallet.
               </p>
 
               <div className="oink-receipt" style={{ width: '100%', margin: '0.5rem 0' }}>
@@ -1794,7 +1420,7 @@ export default function App() {
               <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.4rem', borderTop: '1px solid var(--card-border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>Success (Block Confirmed)</span>
+                  <span style={{ color: 'var(--success)', fontWeight: 600 }}>Confirmed</span>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
