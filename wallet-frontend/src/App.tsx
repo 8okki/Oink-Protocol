@@ -67,7 +67,12 @@ export default function App() {
     return localStorage.getItem('oink_policy') || 'nearest-1';
   });
   const [vaultAddress, setVaultAddress] = useState<string>(() => {
-    return localStorage.getItem('oink_vault_address') || DEFAULT_VAULT_ADDRESS;
+    const saved = localStorage.getItem('oink_vault_address');
+    if (saved === "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db") {
+      localStorage.setItem('oink_vault_address', DEFAULT_VAULT_ADDRESS);
+      return DEFAULT_VAULT_ADDRESS;
+    }
+    return saved || DEFAULT_VAULT_ADDRESS;
   });
 
   // Merchant State
