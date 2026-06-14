@@ -616,81 +616,6 @@ export default function App() {
             {activeTab === 'dashboard' && (
               <div className="tab-content">
 
-                {/* Account Details Card */}
-                <div className="glass-card glow-primary wallet-conn-card" style={{ marginBottom: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem', marginBottom: showAccountDetails ? '1.5rem' : '0' }}>
-                    <div>
-                      <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.4rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <ShieldCheck color="var(--primary)" size={24} />
-                        Oink Smart Wallet
-                      </h2>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        Secure, gas-optimized smart piggy bank wallet.
-                      </p>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                      <button className="btn btn-secondary btn-sm" onClick={handleImportPrivateKey}>
-                        Import Key
-                      </button>
-                      <button className="btn btn-secondary btn-sm btn-danger" onClick={handleResetWallet}>
-                        Reset Key
-                      </button>
-                      <button 
-                        className="btn btn-secondary btn-sm" 
-                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: 0, minWidth: '32px' }}
-                        onClick={() => setShowAccountDetails(!showAccountDetails)}
-                        title={showAccountDetails ? "Hide Wallet Details" : "Show Wallet Details"}
-                      >
-                        {showAccountDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  {showAccountDetails && (
-                    <div className="wallet-connected-grid" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
-                      <div className="wallet-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Smart Account Address</span>
-                          <div className="detail-value">
-                            {wallet ? `${wallet.smartAccountAddress.slice(0, 8)}...${wallet.smartAccountAddress.slice(-8)}` : '0x0'}
-                            <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.smartAccountAddress, 'sa')}>
-                              {copiedText === 'sa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="detail-row">
-                          <span className="detail-label">EOA Signer Address (Owner)</span>
-                          <div className="detail-value">
-                            {wallet ? `${wallet.signerAddress.slice(0, 8)}...${wallet.signerAddress.slice(-8)}` : '0x0'}
-                            <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.signerAddress, 'eoa')}>
-                              {copiedText === 'eoa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="wallet-details">
-                        <div className="detail-row">
-                          <span className="detail-label">Network</span>
-                          <span className="detail-value" style={{ background: 'rgba(219, 39, 119, 0.05)', color: 'var(--primary)', borderColor: 'rgba(219, 39, 119, 0.15)', borderWidth: '1px', borderStyle: 'solid' }}>
-                            Arc Testnet (Chain 5042002)
-                          </span>
-                        </div>
-
-                        <div className="detail-row">
-                          <span className="detail-label">Deployment Status</span>
-                          <span className="status-indicator success">
-                            <Check size={12} />
-                            Active (Demo Ready)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 {/* Balances Section */}
                 <div className="balance-card-grid">
                   <div className="glass-card glow-pink">
@@ -791,6 +716,81 @@ export default function App() {
                     </div>
                   </div>
 
+                </div>
+
+                {/* Account Details Card */}
+                <div className="glass-card glow-primary wallet-conn-card" style={{ marginTop: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.5rem', marginBottom: showAccountDetails ? '1.5rem' : '0' }}>
+                    <div>
+                      <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1.4rem', marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <ShieldCheck color="var(--primary)" size={24} />
+                        Oink Smart Wallet
+                      </h2>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                        Secure, gas-optimized smart piggy bank wallet.
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                      <button className="btn btn-secondary btn-sm" onClick={handleImportPrivateKey}>
+                        Import Key
+                      </button>
+                      <button className="btn btn-secondary btn-sm btn-danger" onClick={handleResetWallet}>
+                        Reset Key
+                      </button>
+                      <button 
+                        className="btn btn-secondary btn-sm" 
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: 0, minWidth: '32px' }}
+                        onClick={() => setShowAccountDetails(!showAccountDetails)}
+                        title={showAccountDetails ? "Hide Wallet Details" : "Show Wallet Details"}
+                      >
+                        {showAccountDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showAccountDetails && (
+                    <div className="wallet-connected-grid" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
+                      <div className="wallet-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Smart Account Address</span>
+                          <div className="detail-value">
+                            {wallet ? `${wallet.smartAccountAddress.slice(0, 8)}...${wallet.smartAccountAddress.slice(-8)}` : '0x0'}
+                            <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.smartAccountAddress, 'sa')}>
+                              {copiedText === 'sa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="detail-row">
+                          <span className="detail-label">EOA Signer Address (Owner)</span>
+                          <div className="detail-value">
+                            {wallet ? `${wallet.signerAddress.slice(0, 8)}...${wallet.signerAddress.slice(-8)}` : '0x0'}
+                            <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.signerAddress, 'eoa')}>
+                              {copiedText === 'eoa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="wallet-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Network</span>
+                          <span className="detail-value" style={{ background: 'rgba(219, 39, 119, 0.05)', color: 'var(--primary)', borderColor: 'rgba(219, 39, 119, 0.15)', borderWidth: '1px', borderStyle: 'solid' }}>
+                            Arc Testnet (Chain 5042002)
+                          </span>
+                        </div>
+
+                        <div className="detail-row">
+                          <span className="detail-label">Deployment Status</span>
+                          <span className="status-indicator success">
+                            <Check size={12} />
+                            Active (Demo Ready)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               </div>
