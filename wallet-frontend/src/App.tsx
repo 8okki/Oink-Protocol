@@ -13,7 +13,9 @@ import {
   ArrowUpRight,
   X,
   Info,
-  TrendingUp
+  TrendingUp,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import {
   getOrCreateEOA,
@@ -51,6 +53,7 @@ export default function App() {
   const [loadingWallet, setLoadingWallet] = useState<boolean>(true);
   const [balances, setBalances] = useState<{ eth: string; usdc: string; eoaUsdc: string; vaultUsdc: string; vaultShares: string }>({ eth: '0.00', usdc: '0.00', eoaUsdc: '0.00', vaultUsdc: '0.00', vaultShares: '0.00' });
   const [copiedText, setCopiedText] = useState<string>('');
+  const [showAddresses, setShowAddresses] = useState<boolean>(false);
 
   // Vault Monitor State
   const [vaultDetails, setVaultDetails] = useState<VaultDetailsData | null>(null);
@@ -637,28 +640,7 @@ export default function App() {
                   </div>
 
                   <div className="wallet-connected-grid">
-                    <div className="wallet-details">
-                      <div className="detail-row">
-                        <span className="detail-label">Smart Account Address</span>
-                        <div className="detail-value">
-                          {wallet ? `${wallet.smartAccountAddress.slice(0, 8)}...${wallet.smartAccountAddress.slice(-8)}` : '0x0'}
-                          <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.smartAccountAddress, 'sa')}>
-                            {copiedText === 'sa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="detail-row">
-                        <span className="detail-label">EOA Signer Address (Owner)</span>
-                        <div className="detail-value">
-                          {wallet ? `${wallet.signerAddress.slice(0, 8)}...${wallet.signerAddress.slice(-8)}` : '0x0'}
-                          <button className="copy-btn" onClick={() => wallet && handleCopy(wallet.signerAddress, 'eoa')}>
-                            {copiedText === 'eoa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
+                    {/* Left Column: Network & Deployment Status */}
                     <div className="wallet-details">
                       <div className="detail-row">
                         <span className="detail-label">Network</span>
@@ -674,6 +656,47 @@ export default function App() {
                           Active (Demo Ready)
                         </span>
                       </div>
+                    </div>
+
+                    {/* Right Column: Collapsible Address Details */}
+                    <div className="wallet-details" style={{ justifyContent: 'flex-start' }}>
+                      <div 
+                        className="detail-row" 
+                        style={{ borderBottom: showAddresses ? '1px solid rgba(236, 72, 153, 0.08)' : 'none', cursor: 'pointer', paddingBottom: showAddresses ? '0.75rem' : '0.5rem' }} 
+                        onClick={() => setShowAddresses(!showAddresses)}
+                      >
+                        <span className="detail-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600, color: 'var(--text)' }}>
+                          Addresses & Keys
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', color: 'var(--primary)', fontSize: '0.85rem', fontWeight: 500 }}>
+                          {showAddresses ? 'Hide Details' : 'Show Details'}
+                          {showAddresses ? <ChevronUp size={16} style={{ marginLeft: '0.25rem' }} /> : <ChevronDown size={16} style={{ marginLeft: '0.25rem' }} />}
+                        </span>
+                      </div>
+
+                      {showAddresses && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', animation: 'fadeIn 0.2s ease-in-out' }}>
+                          <div className="detail-row">
+                            <span className="detail-label">Smart Account Address</span>
+                            <div className="detail-value">
+                              {wallet ? `${wallet.smartAccountAddress.slice(0, 8)}...${wallet.smartAccountAddress.slice(-8)}` : '0x0'}
+                              <button className="copy-btn" onClick={(e) => { e.stopPropagation(); wallet && handleCopy(wallet.smartAccountAddress, 'sa'); }}>
+                                {copiedText === 'sa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="detail-row" style={{ borderBottom: 'none' }}>
+                            <span className="detail-label">EOA Signer Address (Owner)</span>
+                            <div className="detail-value">
+                              {wallet ? `${wallet.signerAddress.slice(0, 8)}...${wallet.signerAddress.slice(-8)}` : '0x0'}
+                              <button className="copy-btn" onClick={(e) => { e.stopPropagation(); wallet && handleCopy(wallet.signerAddress, 'eoa'); }}>
+                                {copiedText === 'eoa' ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -732,53 +755,9 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Bottom Row - Policy Summary & Tx History */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '1.5rem', flexWrap: 'wrap' }}>
-
-                  {/* Left: Policy Status */}
-                  <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Oink Round-Up Status</h3>
-
-                    <div className="switch-control" style={{ background: 'rgba(255,255,255,0.01)' }}>
-                      <div className="switch-label">
-                        <span className="switch-title">Auto-Savings Policy</span>
-                        <span className="switch-desc">
-                          {oinkPolicyEnabled ? 'Actively rounding up transactions' : 'Round-ups are currently suspended'}
-                        </span>
-                      </div>
-                      <label className="switch">
-                        <input
-                          type="checkbox"
-                          checked={oinkPolicyEnabled}
-                          onChange={(e) => setOinkPolicyEnabled(e.target.checked)}
-                        />
-                        <span className="slider pink"></span>
-                      </label>
-                    </div>
-
-                    <div style={{ padding: '1rem', background: 'rgba(0,0,0,0.15)', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)' }}>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>ACTIVE POLICY TYPE</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)', textTransform: 'capitalize' }}>
-                          {oinkPolicy.replace('-', ' ')}
-                        </span>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('settings')}>
-                          <Sliders size={12} />
-                          Configure
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="roundup-preview-alert" style={{ marginTop: 'auto', background: 'rgba(139, 92, 246, 0.04)', borderColor: 'rgba(139, 92, 246, 0.15)' }}>
-                      <Info size={16} className="icon" style={{ color: 'var(--primary)' }} />
-                      <div className="roundup-preview-text">
-                        <div className="roundup-preview-title" style={{ color: 'var(--primary)' }}>Round-Up Routing</div>
-                        Your spare change transfers are batched atomically. No double signature required.
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right: Tx History */}
+                {/* Activity History Section */}
+                <div style={{ marginTop: '1.5rem' }}>
+                  {/* Tx History */}
                   <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Activity History</h3>
@@ -961,20 +940,20 @@ export default function App() {
 
             {/* TAB: SETTINGS */}
             {activeTab === 'settings' && (
-              <div className="tab-content">
-                <div className="glass-card settings-grid">
-
-                  {/* Left Column: Switch & Presets */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
-                      Oink Round-Up Rules
-                    </h3>
-
-                    {/* Enable Toggle */}
-                    <div className="switch-control">
+              <div className="tab-content" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                
+                {/* Oink Round-Up Status Card */}
+                <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700 }}>Oink Round-Up Status</h3>
+                  <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
+                    
+                    {/* Status Toggle */}
+                    <div className="switch-control" style={{ flex: '1 1 300px', background: 'rgba(255,255,255,0.01)', margin: 0 }}>
                       <div className="switch-label">
-                        <span className="switch-title" style={{ fontSize: '1.05rem' }}>Enable Automatic Round-ups</span>
-                        <span className="switch-desc">Collect spare change from all USDC transaction payments</span>
+                        <span className="switch-title">Auto-Savings Policy</span>
+                        <span className="switch-desc">
+                          {oinkPolicyEnabled ? 'Actively rounding up transactions' : 'Round-ups are currently suspended'}
+                        </span>
                       </div>
                       <label className="switch">
                         <input
@@ -985,6 +964,34 @@ export default function App() {
                         <span className="slider pink"></span>
                       </label>
                     </div>
+
+                    {/* Active Policy Type display */}
+                    <div style={{ flex: '1 1 200px', padding: '1rem', background: 'rgba(0,0,0,0.15)', borderRadius: 'var(--radius-md)', border: '1px solid var(--card-border)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>ACTIVE POLICY TYPE</div>
+                      <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text)', textTransform: 'capitalize' }}>
+                        {oinkPolicy.replace('-', ' ')}
+                      </span>
+                    </div>
+
+                    {/* Round-Up Routing Info */}
+                    <div className="roundup-preview-alert" style={{ flex: '2 1 350px', margin: 0, background: 'rgba(139, 92, 246, 0.04)', borderColor: 'rgba(139, 92, 246, 0.15)', display: 'flex', alignItems: 'center' }}>
+                      <Info size={16} className="icon" style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                      <div className="roundup-preview-text">
+                        <div className="roundup-preview-title" style={{ color: 'var(--primary)' }}>Round-Up Routing</div>
+                        Your spare change transfers are batched atomically. No double signature required.
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
+                <div className="glass-card settings-grid">
+
+                  {/* Left Column: Rules & Presets */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
+                      Oink Round-Up Rules
+                    </h3>
 
                     {/* Round-up Presets */}
                     <div className="form-group" style={{ opacity: oinkPolicyEnabled ? 1 : 0.5, pointerEvents: oinkPolicyEnabled ? 'auto' : 'none', transition: 'opacity 0.2s' }}>
