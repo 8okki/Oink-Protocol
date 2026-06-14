@@ -15,36 +15,21 @@ contract MockAaveV4SpokeTest is Test {
         spoke = new MockAaveV4Spoke("Mock Plus Spoke", "mAV4Plus", usdc, 580, owner);
     }
 
-    function test_FluctuatingAPY() public {
-        // Initially, the base APY is 580 bps (5.8%)
-        assertEq(spoke.baseAPY(), 580);
-        
-        // APY at block.timestamp = 0
-        uint256 apy0 = spoke.supplyAPY();
+    function test_StaticAPY() public {
+        // Initially, the APY is 580 bps (5.8%)
+        assertEq(spoke.supplyAPY(), 580);
         
         // Warp time by 30 seconds
         vm.warp(30);
-        uint256 apy30 = spoke.supplyAPY();
+        assertEq(spoke.supplyAPY(), 580);
         
         // Warp time by 60 seconds
         vm.warp(60);
-        uint256 apy60 = spoke.supplyAPY();
+        assertEq(spoke.supplyAPY(), 580);
         
-        // Warp time by 90 seconds
-        vm.warp(90);
-        uint256 apy90 = spoke.supplyAPY();
-        
-        // Warp time should result in different values
-        assertTrue(apy0 != apy30 || apy30 != apy60 || apy60 != apy90);
-        
-        // Check that the period works exactly
-        uint256 uniqueSeed = uint256(uint160(address(spoke)));
-        uint256 period = 120 + (uniqueSeed % 61);
-        
-        vm.warp(100);
-        uint256 apy100 = spoke.supplyAPY();
-        vm.warp(100 + period);
-        uint256 apyLater = spoke.supplyAPY();
-        assertEq(apy100, apyLater);
+        // Owner updates APY
+        vm.prank(owner);
+        spoke.setSupplyAPY(600);
+        assertEq(spoke.supplyAPY(), 600);
     }
 }

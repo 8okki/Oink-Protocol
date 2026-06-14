@@ -42,7 +42,7 @@ interface Transaction {
 }
 
 const MERCHANT_ADDRESS = "0x2191e22e44341741D741aC5adE90A23220a84275";
-const DEFAULT_VAULT_ADDRESS = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
+const DEFAULT_VAULT_ADDRESS = "0x048707CC0dD427316c3Be92CE4d9Ba021a3A4b67";
 
 export default function App() {
   // Navigation
@@ -71,12 +71,26 @@ export default function App() {
   });
   const [vaultAddress, setVaultAddress] = useState<string>(() => {
     const saved = localStorage.getItem('oink_vault_address');
-    if (saved === "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db") {
+    if (saved === "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db" || saved === "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0") {
       localStorage.setItem('oink_vault_address', DEFAULT_VAULT_ADDRESS);
       return DEFAULT_VAULT_ADDRESS;
     }
     return saved || DEFAULT_VAULT_ADDRESS;
   });
+
+  const [smartAccountAddressConfig, setSmartAccountAddressConfig] = useState<string>(() => {
+    const saved = localStorage.getItem('oink_smart_account_address');
+    if (saved === "0x1Ae81be0ac0b2CD93e78E3ba05654196144C9661") {
+      localStorage.setItem('oink_smart_account_address', "0xB2ae1B1473a1c25Fdd21D330c0C8EAD320D2A61F");
+      return "0xB2ae1B1473a1c25Fdd21D330c0C8EAD320D2A61F";
+    }
+    return saved || "0xB2ae1B1473a1c25Fdd21D330c0C8EAD320D2A61F";
+  });
+
+  const handleUpdateSmartAccount = (val: string) => {
+    setSmartAccountAddressConfig(val);
+    localStorage.setItem('oink_smart_account_address', val);
+  };
 
   // Merchant State
   const [selectedItem, setSelectedItem] = useState<{ id: string; name: string; price: number; emoji: string } | null>(null);
@@ -149,11 +163,11 @@ export default function App() {
     ] as Transaction[];
   });
 
-  // Load / Initialize Wallet on Mount
+  // Load / Initialize Wallet on Mount and when smart account config changes
   useEffect(() => {
     const pkey = getOrCreateEOA();
     loadWallet(pkey);
-  }, []);
+  }, [smartAccountAddressConfig, vaultAddress]);
 
   // Sync states to localStorage
   useEffect(() => {
@@ -174,11 +188,11 @@ export default function App() {
 
   const loadWallet = async (pkey: string) => {
     setLoadingWallet(true);
-    const details = await initBiconomyAccount(pkey);
+    const details = await initBiconomyAccount(pkey, smartAccountAddressConfig);
     setWallet(details);
 
     // Fetch balances
-    const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated);
+    const bal = await fetchBalances(details.smartAccountAddress, details.signerAddress, details.isSimulated, vaultAddress);
     setBalances(bal);
     setLoadingWallet(false);
 
@@ -211,7 +225,7 @@ export default function App() {
     if (!wallet) return;
     setIsRefreshingBalances(true);
 
-    const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
+    const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated, vaultAddress);
     setBalances(bal);
 
     const vaultDet = await fetchVaultDetails(wallet.isSimulated);
@@ -295,7 +309,7 @@ export default function App() {
       );
 
       // Refresh actual balances from blockchain
-      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
+      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated, vaultAddress);
       setBalances(bal);
 
       // Fetch updated vault details
@@ -390,7 +404,7 @@ export default function App() {
       );
 
       // Fetch updated balances
-      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
+      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated, vaultAddress);
       setBalances(bal);
 
       // Fetch updated vault details
@@ -1040,6 +1054,23 @@ export default function App() {
                     <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 700, borderBottom: '1px solid var(--card-border)', paddingBottom: '0.75rem', color: 'var(--text)' }}>
                       Routing & Destination
                     </h3>
+
+                    <div className="form-group">
+                      <label style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                        <span>Oink Smart Account Address</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-dark)' }}>Active Router</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="custom-input"
+                        value={smartAccountAddressConfig}
+                        onChange={(e) => handleUpdateSmartAccount(e.target.value)}
+                        placeholder="0x..."
+                      />
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                        This is the custom Biconomy Smart Account proxy address where your on-chain funds are routed.
+                      </p>
+                    </div>
 
                     <div className="form-group">
                       <label style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>

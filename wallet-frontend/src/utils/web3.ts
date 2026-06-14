@@ -3,7 +3,7 @@ import { createSmartAccountClient } from "@biconomy/account";
 
 const ARC_TESTNET_RPC = "https://rpc.testnet.arc.network";
 const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000"; // Native Arc Testnet USDC (ERC-20 interface)
-const DEPLOYED_OINK_VAULT = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
+const DEPLOYED_OINK_VAULT = "0x048707CC0dD427316c3Be92CE4d9Ba021a3A4b67";
 
 export interface WalletDetails {
   privateKey: string;
@@ -32,21 +32,29 @@ export function resetEOA(): string {
 }
 
 // Initialize Biconomy Smart Account
-export async function initBiconomyAccount(privateKey: string): Promise<WalletDetails> {
+export async function initBiconomyAccount(
+  privateKey: string,
+  customSmartAccountAddress?: string
+): Promise<WalletDetails> {
   try {
     const provider = new ethers.JsonRpcProvider(ARC_TESTNET_RPC);
     const signer = new ethers.Wallet(privateKey, provider);
     
-    // We use a custom bundler URL targeting Arc Testnet (Chain ID 5042002) for Biconomy setup.
-    const bundlerUrl = "https://bundler.biconomy.io/api/v2/5042002/nPt4VTZQ6.5e9f1222-30d8-4f8b-b78f-6b22b10a26d7";
+    let smartAccountAddress = "";
+    if (customSmartAccountAddress && ethers.isAddress(customSmartAccountAddress)) {
+      smartAccountAddress = customSmartAccountAddress;
+    } else {
+      // We use a custom bundler URL targeting Arc Testnet (Chain ID 5042002) for Biconomy setup.
+      const bundlerUrl = "https://bundler.biconomy.io/api/v2/5042002/nPt4VTZQ6.5e9f1222-30d8-4f8b-b78f-6b22b10a26d7";
 
-    const smartAccountClient = await createSmartAccountClient({
-      signer,
-      bundlerUrl,
-      rpcUrl: ARC_TESTNET_RPC,
-    });
+      const smartAccountClient = await createSmartAccountClient({
+        signer,
+        bundlerUrl,
+        rpcUrl: ARC_TESTNET_RPC,
+      });
 
-    const smartAccountAddress = await smartAccountClient.getAccountAddress();
+      smartAccountAddress = await smartAccountClient.getAccountAddress();
+    }
 
     return {
       privateKey,
@@ -57,19 +65,23 @@ export async function initBiconomyAccount(privateKey: string): Promise<WalletDet
   } catch (error) {
     console.warn("Failed to initialize on-chain Biconomy Smart Account, falling back to simulation:", error);
     
-    // Graceful fallback for mock/offline demo
     const tempSigner = new ethers.Wallet(privateKey);
     
-    // Derive a simulated deterministic smart account address from the EOA
-    const mockSmartAccountAddress = ethers.getCreateAddress({
-      from: tempSigner.address,
-      nonce: 0,
-    });
+    let smartAccountAddress = "";
+    if (customSmartAccountAddress && ethers.isAddress(customSmartAccountAddress)) {
+      smartAccountAddress = customSmartAccountAddress;
+    } else {
+      // Derive a simulated deterministic smart account address from the EOA
+      smartAccountAddress = ethers.getCreateAddress({
+        from: tempSigner.address,
+        nonce: 0,
+      });
+    }
     
     return {
       privateKey,
       signerAddress: tempSigner.address,
-      smartAccountAddress: mockSmartAccountAddress,
+      smartAccountAddress,
       isSimulated: true,
     };
   }
@@ -79,7 +91,8 @@ export async function initBiconomyAccount(privateKey: string): Promise<WalletDet
 export async function fetchBalances(
   smartAccountAddress: string,
   signerAddress: string,
-  isSimulated: boolean
+  isSimulated: boolean,
+  vaultAddress?: string
 ): Promise<{ eth: string; usdc: string; eoaUsdc: string; vaultUsdc: string; vaultShares: string }> {
   if (isSimulated) {
     // Return mock values stored or defaults
@@ -137,7 +150,7 @@ export async function fetchBalances(
         "function balanceOf(address) view returns (uint256)",
         "function convertToAssets(uint256) view returns (uint256)"
       ];
-      const vaultContract = new ethers.Contract(DEPLOYED_OINK_VAULT, vaultAbi, provider);
+      const vaultContract = new ethers.Contract(vaultAddress || DEPLOYED_OINK_VAULT, vaultAbi, provider);
       const shares = await vaultContract.balanceOf(smartAccountAddress);
       vaultSharesBalance = parseFloat(ethers.formatUnits(shares, 6)).toFixed(2);
 
@@ -347,7 +360,7 @@ export interface VaultDetailsData {
 }
 
 export async function fetchVaultDetails(isSimulated: boolean): Promise<VaultDetailsData> {
-  const DEPLOYED_OINK_VAULT = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
+  const DEPLOYED_OINK_VAULT = "0x048707CC0dD427316c3Be92CE4d9Ba021a3A4b67";
   const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000";
 
   if (isSimulated) {
