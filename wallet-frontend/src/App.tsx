@@ -40,7 +40,7 @@ interface Transaction {
 }
 
 const MERCHANT_ADDRESS = "0x2191e22e44341741D741aC5adE90A23220a84275";
-const DEFAULT_VAULT_ADDRESS = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
+const DEFAULT_VAULT_ADDRESS = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
 
 export default function App() {
   // Navigation
@@ -180,18 +180,8 @@ export default function App() {
   };
 
   const handleResetWallet = async () => {
-    if (window.confirm("Are you sure you want to generate a new mock EOA? Your old private key and local balances will be reset.")) {
+    if (window.confirm("Are you sure you want to generate a new EOA? Your old private key will be reset.")) {
       const newPkey = resetEOA();
-      localStorage.removeItem('oink_mock_eth');
-      localStorage.removeItem('oink_mock_usdc');
-      localStorage.setItem('oink_vault_balance', '24.50');
-      localStorage.setItem('oink_vault_shares', '24.50');
-      // Reset mock vault monitor assets
-      localStorage.setItem("oink_vault_mock_total_assets", "1420.50");
-      localStorage.setItem("oink_vault_mock_total_supply", "1380.00");
-      localStorage.setItem("oink_vault_mock_local", "120.50");
-      localStorage.setItem("oink_vault_mock_allocated", "1300.00");
-      setBalances(prev => ({ ...prev, vaultUsdc: '24.50', vaultShares: '24.50' }));
       await loadWallet(newPkey);
     }
   };
@@ -202,16 +192,6 @@ export default function App() {
       const cleanKey = pkey.trim();
       if (/^0x[a-fA-F0-9]{64}$/.test(cleanKey)) {
         localStorage.setItem("oink_eoa_private_key", cleanKey);
-        localStorage.removeItem('oink_mock_eth');
-        localStorage.removeItem('oink_mock_usdc');
-        localStorage.setItem('oink_vault_balance', '0.00');
-        localStorage.setItem('oink_vault_shares', '0.00');
-        // Reset mock vault monitor assets
-        localStorage.setItem("oink_vault_mock_total_assets", "0.00");
-        localStorage.setItem("oink_vault_mock_total_supply", "0.00");
-        localStorage.setItem("oink_vault_mock_local", "0.00");
-        localStorage.setItem("oink_vault_mock_allocated", "0.00");
-        setBalances(prev => ({ ...prev, vaultUsdc: '0.00', vaultShares: '0.00' }));
         await loadWallet(cleanKey);
       } else {
         alert("Invalid private key format! It must be a 64-character hex string starting with 0x.");
@@ -284,127 +264,81 @@ export default function App() {
     setCheckoutStep('confirm');
   };
 
-  const handleConfirmOink = () => {
+  const handleConfirmOink = async () => {
     setCheckoutStep('sending');
     const finalRoundup = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutRoundup : 0;
     const finalTotal = oinkPolicyEnabled && checkoutRoundup > 0 ? checkoutTotal : checkoutPrice;
-    executeMockTransaction(checkoutPrice, finalRoundup, finalTotal);
-  };
 
-  const executeMockTransaction = async (price: number, roundup: number, total: number) => {
-    let txHash = "";
-
-    if (wallet && !wallet.isSimulated) {
-      try {
-        // Run real transaction on-chain via EOA -> Smart Account -> Merchant + Vault
-        txHash = await executeOinkPayment(
-          wallet.privateKey,
-          wallet.smartAccountAddress,
-          MERCHANT_ADDRESS,
-          price,
-          roundup,
-          vaultAddress
-        );
-
-        // Refresh actual balances from blockchain
-        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
-        setBalances(bal);
-      } catch (err: any) {
-        console.error("On-chain transaction execution failed:", err);
-        alert(`Transaction failed: ${err.message || err}`);
-        setCheckoutStep('idle');
-        return;
-      }
-    } else {
-      // Simulate smart account txn signature & execution delay
-      await new Promise(r => setTimeout(r, 2200));
-
-      // Deduct USDC balance from owner EOA
-      const currentEoaUsdc = parseFloat(balances.eoaUsdc);
-      const newEoaUsdc = (currentEoaUsdc - total).toFixed(2);
-      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
-
-      // If Oink is enabled, add to vault
-      let newVaultUsdc = balances.vaultUsdc;
-      let newVaultShares = balances.vaultShares;
-      if (oinkPolicyEnabled && roundup > 0) {
-        const newVault = parseFloat(balances.vaultUsdc) + roundup;
-        newVaultUsdc = newVault.toFixed(2);
-        localStorage.setItem('oink_vault_balance', newVaultUsdc);
-
-        const newShares = parseFloat(balances.vaultShares) + roundup;
-        newVaultShares = newShares.toFixed(2);
-        localStorage.setItem('oink_vault_shares', newVaultShares);
-
-        // Update mock vault details in localStorage
-        const mockTotalAssets = localStorage.getItem("oink_vault_mock_total_assets") || "1420.50";
-        const mockTotalSupply = localStorage.getItem("oink_vault_mock_total_supply") || "1380.00";
-        const mockLocal = localStorage.getItem("oink_vault_mock_local") || "120.50";
-
-        const newAssetsVal = (parseFloat(mockTotalAssets) + roundup).toFixed(2);
-        const newSupplyVal = (parseFloat(mockTotalSupply) + roundup).toFixed(2);
-        const newLocalVal = (parseFloat(mockLocal) + roundup).toFixed(2);
-
-        localStorage.setItem("oink_vault_mock_total_assets", newAssetsVal);
-        localStorage.setItem("oink_vault_mock_total_supply", newSupplyVal);
-        localStorage.setItem("oink_vault_mock_local", newLocalVal);
-      }
-
-      // Update state balance
-      setBalances(prev => ({
-        ...prev,
-        eoaUsdc: newEoaUsdc,
-        vaultUsdc: newVaultUsdc,
-        vaultShares: newVaultShares
-      }));
-
-      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    if (!wallet) {
+      alert("No wallet connected!");
+      setCheckoutStep('idle');
+      return;
     }
 
-    // Fetch updated vault details
-    const vaultDet = await fetchVaultDetails(wallet ? wallet.isSimulated : true);
-    setVaultDetails(vaultDet);
+    try {
+      // Run real transaction on-chain via EOA -> Smart Account -> Merchant + Vault
+      const txHash = await executeOinkPayment(
+        wallet.privateKey,
+        wallet.smartAccountAddress,
+        MERCHANT_ADDRESS,
+        checkoutPrice,
+        finalRoundup,
+        vaultAddress
+      );
 
-    // Add transactions to history
-    const mainTx: Transaction = {
-      id: `tx-m-${Date.now()}`,
-      type: 'purchase',
-      title: selectedItem ? `${selectedItem.name} Purchase` : 'Merchant Payment',
-      amount: price,
-      roundup: roundup,
-      timestamp: new Date().toISOString(),
-      status: 'success',
-      txHash: txHash
-    };
+      // Refresh actual balances from blockchain
+      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
+      setBalances(bal);
 
-    let newTxs = [mainTx];
+      // Fetch updated vault details
+      const vaultDet = await fetchVaultDetails(wallet.isSimulated);
+      setVaultDetails(vaultDet);
 
-    if (oinkPolicyEnabled && roundup > 0) {
-      const savingsTx: Transaction = {
-        id: `tx-s-${Date.now()}`,
-        type: 'savings',
-        title: 'Oink Round-Up Savings',
-        amount: roundup,
-        roundup: 0,
+      // Add transactions to history
+      const mainTx: Transaction = {
+        id: `tx-m-${Date.now()}`,
+        type: 'purchase',
+        title: selectedItem ? `${selectedItem.name} Purchase` : 'Merchant Payment',
+        amount: checkoutPrice,
+        roundup: finalRoundup,
         timestamp: new Date().toISOString(),
         status: 'success',
         txHash: txHash
       };
-      newTxs.push(savingsTx);
+
+      let newTxs = [mainTx];
+
+      if (oinkPolicyEnabled && finalRoundup > 0) {
+        const savingsTx: Transaction = {
+          id: `tx-s-${Date.now()}`,
+          type: 'savings',
+          title: 'Oink Round-Up Savings',
+          amount: finalRoundup,
+          roundup: 0,
+          timestamp: new Date().toISOString(),
+          status: 'success',
+          txHash: txHash
+        };
+        newTxs.push(savingsTx);
+      }
+
+      setTransactions(prev => [...newTxs, ...prev]);
+      setActiveTxResult({
+        merchantAmount: checkoutPrice,
+        roundupAmount: finalRoundup,
+        totalAmount: finalTotal,
+        txHash: txHash
+      });
+      setCheckoutStep('success');
+
+      // Clean selections
+      setSelectedItem(null);
+      setCustomAmount('');
+    } catch (err: any) {
+      console.error("On-chain transaction execution failed:", err);
+      alert(`Transaction failed: ${err.message || err}`);
+      setCheckoutStep('idle');
     }
-
-    setTransactions(prev => [...newTxs, ...prev]);
-    setActiveTxResult({
-      merchantAmount: price,
-      roundupAmount: roundup,
-      totalAmount: total,
-      txHash: txHash
-    });
-    setCheckoutStep('success');
-
-    // Clean selections
-    setSelectedItem(null);
-    setCustomAmount('');
   };
 
   const handleWithdrawClick = async () => {
@@ -423,107 +357,70 @@ export default function App() {
     setWithdrawStep('confirm');
 
     // Preview the shares to burn
-    if (wallet && !wallet.isSimulated) {
+    if (wallet) {
       const shares = await previewWithdrawShares(vaultAddress, amount);
       setWithdrawSharesPreview(shares);
-    } else {
-      // 1:1 in simulation
-      setWithdrawSharesPreview(amount.toFixed(2));
     }
   };
 
   const handleConfirmWithdraw = async () => {
     setWithdrawStep('sending');
     const amount = parseFloat(withdrawAmount);
-    let txHash = "";
 
-    if (wallet && !wallet.isSimulated) {
-      try {
-        txHash = await executeOinkWithdraw(
-          wallet.privateKey,
-          wallet.smartAccountAddress,
-          vaultAddress,
-          amount
-        );
-
-        // Fetch updated balances
-        const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, false);
-        setBalances(bal);
-      } catch (err: any) {
-        console.error("On-chain withdrawal failed:", err);
-        alert(`Withdrawal failed: ${err.message || err}`);
-        setWithdrawStep('idle');
-        return;
-      }
-    } else {
-      // Mock withdrawal simulation
-      await new Promise(r => setTimeout(r, 2200));
-
-      const mockVaultBalance = parseFloat(balances.vaultUsdc);
-      const mockVaultShares = parseFloat(balances.vaultShares);
-      const mockEoaUsdc = parseFloat(balances.eoaUsdc);
-
-      const newVaultUsdc = (mockVaultBalance - amount).toFixed(2);
-      const newVaultShares = (mockVaultShares - amount).toFixed(2);
-      const newEoaUsdc = (mockEoaUsdc + amount).toFixed(2);
-
-      localStorage.setItem('oink_vault_balance', newVaultUsdc);
-      localStorage.setItem('oink_vault_shares', newVaultShares);
-      localStorage.setItem('oink_mock_eoa_usdc', newEoaUsdc);
-
-      // Update mock vault details in localStorage
-      const mockTotalAssets = localStorage.getItem("oink_vault_mock_total_assets") || "1420.50";
-      const mockTotalSupply = localStorage.getItem("oink_vault_mock_total_supply") || "1380.00";
-      const mockLocal = localStorage.getItem("oink_vault_mock_local") || "120.50";
-
-      const newAssetsVal = Math.max(0, parseFloat(mockTotalAssets) - amount).toFixed(2);
-      const newSupplyVal = Math.max(0, parseFloat(mockTotalSupply) - amount).toFixed(2);
-      const newLocalVal = Math.max(0, parseFloat(mockLocal) - amount).toFixed(2);
-
-      localStorage.setItem("oink_vault_mock_total_assets", newAssetsVal);
-      localStorage.setItem("oink_vault_mock_total_supply", newSupplyVal);
-      localStorage.setItem("oink_vault_mock_local", newLocalVal);
-
-      setBalances(prev => ({
-        ...prev,
-        vaultUsdc: newVaultUsdc,
-        vaultShares: newVaultShares,
-        eoaUsdc: newEoaUsdc
-      }));
-
-      txHash = '0x' + Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    if (!wallet) {
+      alert("No wallet connected!");
+      setWithdrawStep('idle');
+      return;
     }
 
-    // Fetch updated vault details
-    const vaultDet = await fetchVaultDetails(wallet ? wallet.isSimulated : true);
-    setVaultDetails(vaultDet);
+    try {
+      const txHash = await executeOinkWithdraw(
+        wallet.privateKey,
+        wallet.smartAccountAddress,
+        vaultAddress,
+        amount
+      );
 
-    // Add withdrawal to transaction history
-    const withdrawTx: Transaction = {
-      id: `tx-w-${Date.now()}`,
-      type: 'savings',
-      title: 'Oink Vault Savings Withdrawal',
-      amount: amount,
-      roundup: 0,
-      timestamp: new Date().toISOString(),
-      status: 'success',
-      txHash: txHash
-    };
+      // Fetch updated balances
+      const bal = await fetchBalances(wallet.smartAccountAddress, wallet.signerAddress, wallet.isSimulated);
+      setBalances(bal);
 
-    setTransactions(prev => [withdrawTx, ...prev]);
-    setActiveWithdrawHash(txHash);
-    setWithdrawStep('success');
+      // Fetch updated vault details
+      const vaultDet = await fetchVaultDetails(wallet.isSimulated);
+      setVaultDetails(vaultDet);
+
+      // Add withdrawal to transaction history
+      const withdrawTx: Transaction = {
+        id: `tx-w-${Date.now()}`,
+        type: 'savings',
+        title: 'Oink Vault Savings Withdrawal',
+        amount: amount,
+        roundup: 0,
+        timestamp: new Date().toISOString(),
+        status: 'success',
+        txHash: txHash
+      };
+
+      setTransactions(prev => [withdrawTx, ...prev]);
+      setActiveWithdrawHash(txHash);
+      setWithdrawStep('success');
+    } catch (err: any) {
+      console.error("On-chain withdrawal failed:", err);
+      alert(`Withdrawal failed: ${err.message || err}`);
+      setWithdrawStep('idle');
+    }
   };
 
-  // 1. Interpolated Yield Gains data over 30 days
-  const yieldHistory = Array.from({ length: 30 }, (_, i) => {
-    const day = 29 - i;
-    const date = new Date(Date.now() - day * 24 * 3600 * 1000);
+  // 1. Interpolated Yield Gains data over the past 24 hours
+  const yieldHistory = Array.from({ length: 24 }, (_, i) => {
+    const hour = 23 - i;
+    const date = new Date(Date.now() - hour * 3600 * 1000);
+    const hourStr = date.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
     const currentPrice = vaultDetails ? parseFloat(vaultDetails.sharePrice) : 1.0294;
     const startPrice = 1.0000;
 
     // Smooth compounding curve with a little organic drift
-    const progress = i / 29;
+    const progress = i / 23;
     const curve = Math.sin(progress * Math.PI * 0.5) * 0.95 + progress * 0.05;
     const price = startPrice + (currentPrice - startPrice) * curve;
 
@@ -531,8 +428,8 @@ export default function App() {
     const yieldEarned = (price - 1.0000) * supply;
 
     return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      date: hourStr,
+      fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) + ' ' + hourStr,
       sharePrice: price.toFixed(4),
       yieldEarned: Math.max(0, yieldEarned).toFixed(2),
       percentage: ((price - 1.0000) * 100).toFixed(2)
@@ -581,7 +478,7 @@ export default function App() {
 
   const getLinePath = () => {
     return yieldHistory.map((d, index) => {
-      const x = (index / 29) * 500;
+      const x = (index / (yieldHistory.length - 1)) * 500;
       const y = 170 - ((parseFloat(d.sharePrice) - yMin) / (yMax - yMin)) * 140;
       return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
     }).join(' ');
@@ -618,7 +515,7 @@ export default function App() {
             onClick={() => setActiveTab('merchant')}
           >
             <ShoppingBag size={20} />
-            <span>Merchant Sandbox</span>
+            <span>Merchants</span>
           </div>
 
           <div
@@ -680,9 +577,9 @@ export default function App() {
 
           <div className="header-actions">
             {wallet && (
-              <div className={`connection-pill ${wallet.isSimulated ? '' : 'connected'}`}>
+              <div className="connection-pill connected">
                 <span className="connection-dot"></span>
-                <span>{wallet.isSimulated ? 'Demo Mode' : 'Oink Smart Wallet'}</span>
+                <span>Oink Smart Wallet</span>
               </div>
             )}
 
@@ -1178,7 +1075,7 @@ export default function App() {
 
             {/* TAB: VAULT MONITOR */}
             {activeTab === 'vault' && (() => {
-              const lineTicks = [0, 7, 14, 21, 29];
+              const lineTicks = [0, 6, 12, 18, 23];
               const priceGridValues = [yMin, yMin + (yMax - yMin) / 2, yMax];
               return (
                 <div className="tab-content">
@@ -1268,7 +1165,7 @@ export default function App() {
                         <div className="chart-header">
                           <div>
                             <h3 className="chart-title">Yield Gains Growth</h3>
-                            <p className="chart-subtitle">Progressive increase of share value and compounding earnings (30d)</p>
+                            <p className="chart-subtitle">Progressive increase of share value and compounding earnings (24h)</p>
                           </div>
                           <div className="legend-item" style={{ background: 'rgba(236, 72, 153, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem' }}>
                             <span className="legend-dot allocated"></span>
@@ -1282,7 +1179,7 @@ export default function App() {
                             <div
                               className="chart-tooltip"
                               style={{
-                                left: `${(hoveredYieldIndex / 29) * 80}%`,
+                                left: `${(hoveredYieldIndex / (yieldHistory.length - 1)) * 80}%`,
                                 top: '10px'
                               }}
                             >
@@ -1310,8 +1207,8 @@ export default function App() {
                               const rect = e.currentTarget.getBoundingClientRect();
                               const x = e.clientX - rect.left;
                               const svgWidth = rect.width;
-                              const index = Math.round((x / svgWidth) * 29);
-                              if (index >= 0 && index < 30) {
+                              const index = Math.round((x / svgWidth) * (yieldHistory.length - 1));
+                              if (index >= 0 && index < yieldHistory.length) {
                                 setHoveredYieldIndex(index);
                               }
                             }}
@@ -1353,9 +1250,9 @@ export default function App() {
                             {lineTicks.map(idx => (
                               <line
                                 key={`grid-${idx}`}
-                                x1={(idx / 29) * 500}
+                                x1={(idx / (yieldHistory.length - 1)) * 500}
                                 y1={30}
-                                x2={(idx / 29) * 500}
+                                x2={(idx / (yieldHistory.length - 1)) * 500}
                                 y2={170}
                                 stroke="rgba(236, 72, 153, 0.05)"
                                 strokeDasharray="4 4"
@@ -1382,7 +1279,7 @@ export default function App() {
 
                             {/* Interactive Hover Guides */}
                             {hoveredYieldIndex !== null && (() => {
-                              const x = (hoveredYieldIndex / 29) * 500;
+                              const x = (hoveredYieldIndex / (yieldHistory.length - 1)) * 500;
                               const y = 170 - ((parseFloat(yieldHistory[hoveredYieldIndex].sharePrice) - yMin) / (yMax - yMin)) * 140;
                               return (
                                 <>
@@ -1412,7 +1309,7 @@ export default function App() {
                             {lineTicks.map(idx => (
                               <text
                                 key={`lbl-${idx}`}
-                                x={(idx / 29) * 500}
+                                x={(idx / (yieldHistory.length - 1)) * 500}
                                 y={190}
                                 textAnchor="middle"
                                 fontSize="10"

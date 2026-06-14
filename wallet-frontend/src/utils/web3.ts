@@ -5,7 +5,7 @@ const ARC_TESTNET_RPC = "https://rpc.testnet.arc.network";
 const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000"; // Native Arc Testnet USDC (ERC-20 interface)
 const DEPLOYED_OINK_SMART_ACCOUNT = "0x1Ae81be0ac0b2CD93e78E3ba05654196144C9661";
 const DEPLOYER_EOA_ADDRESS = "0x4636b45ac382f5429b36f5d7b7ba8fe2b7406d2f";
-const DEPLOYED_OINK_VAULT = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
+const DEPLOYED_OINK_VAULT = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
 
 export interface WalletDetails {
   privateKey: string;
@@ -377,7 +377,7 @@ export interface VaultDetailsData {
 }
 
 export async function fetchVaultDetails(isSimulated: boolean): Promise<VaultDetailsData> {
-  const DEPLOYED_OINK_VAULT = "0x18A49aEF7e31ea27E727025185F12FF0633cd6Db";
+  const DEPLOYED_OINK_VAULT = "0x2D7d05f5992A9AB1CbA95DAd6A130e7E77C32FF0";
   const ARC_USDC_CONTRACT = "0x3600000000000000000000000000000000000000";
 
   if (isSimulated) {
