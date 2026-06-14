@@ -95,6 +95,43 @@ const PROJECTED_DAYS = parseInt(process.env.PROJECTED_DAYS || '30', 10);
 const PRINCIPAL_AMOUNT = parseFloat(process.env.PRINCIPAL_AMOUNT || '10000');
 const POLLING_INTERVAL_MS = parseInt(process.env.POLLING_INTERVAL_SECONDS || '300', 10) * 1000;
 
+// Address-to-name mapping for display formatting
+const POOL_NAMES: Record<string, string> = {
+  // Current whitelisted Spokes on Arc Testnet
+  '0x8fD6AFd64aA76cBAbD082f39C17d19D8dEa99D5E': 'Mock Aave V4 Core Spoke',
+  '0xF3EF30745F52b067538d918Bc6cE151c07C18929': 'Mock Aave V4 Prime Spoke',
+  '0xA56971E50C0d58C8d57D4F7D5869eC03A056Ad10': 'Mock Aave V4 Plus Spoke',
+  // Old/Alternative mock Spokes
+  '0xAbFF216dD7A23869E39569dBd65BDA74A44ff4ba': 'Mock Aave V4 Core Spoke (Old)',
+  '0x32cCf89ea3945A8054Ff5Cb7777bDd00DC8C04D0': 'Mock Aave V4 Prime Spoke (Old)',
+  '0x8A98cdCaf93631a5fBc8D2f0E8CefaaFB9B73b2b': 'Mock Aave V4 Plus Spoke (Old)',
+  '0xa40451A717764dA7F42C16A046f799665354Fe57': 'Mock Aave V4 Core Spoke (Old)',
+  '0x3990B69Be889ECffBeB5C970A1D296b08abeF999': 'Mock Aave V4 Prime Spoke (Old)',
+  '0xbEE717E2f5B4F877c68Ea6448aD07580A63ad459': 'Mock Aave V4 Plus Spoke (Old)',
+  '0x1111111111111111111111111111111111111111': 'Mock Dummy Source Spoke',
+};
+
+function formatPoolName(address: string): string {
+  if (!address) return '';
+  const normalized = address.toLowerCase();
+  for (const [key, val] of Object.entries(POOL_NAMES)) {
+    if (key.toLowerCase() === normalized) {
+      return `${val} (${address.slice(0, 6)}...${address.slice(-4)})`;
+    }
+  }
+  return address;
+}
+
+function replaceAddressesInText(text: string): string {
+  let result = text;
+  for (const [addr, name] of Object.entries(POOL_NAMES)) {
+    const displayStr = `${name} (${addr.slice(0, 6)}...${addr.slice(-4)})`;
+    const regex = new RegExp(addr, 'gi');
+    result = result.replace(regex, displayStr);
+  }
+  return result;
+}
+
 // Setup clients
 const sourcePublicClient = createPublicClient({
   chain: arcTestnet,
@@ -124,7 +161,7 @@ const sourceWalletClient = account
  * If live calls fail or are mock addresses, returns simulation fallbacks.
  */
 async function toolFetchYields(poolAddresses: string[]) {
-  console.log(`[Tool Call] Fetching yield rates for pools:`, poolAddresses);
+  console.log(`[Tool Call] Fetching yield rates for pools:`, poolAddresses.map(formatPoolName));
   const results: { poolAddress: string; yieldPercent: number; isMock: boolean }[] = [];
 
   for (let i = 0; i < poolAddresses.length; i++) {
@@ -145,7 +182,7 @@ async function toolFetchYields(poolAddresses: string[]) {
         yieldPercent,
         isMock: false,
       });
-      console.log(`  Pool ${pool} yield: ${(yieldPercent * 100).toFixed(2)}% (from chain)`);
+      console.log(`  Pool ${formatPoolName(pool)} yield: ${(yieldPercent * 100).toFixed(2)}% (from chain)`);
     } catch (err: any) {
       console.error(`  Failed to query yield from spoke ${pool}:`, err.message || err);
       // Fallback if network call fails
@@ -283,7 +320,7 @@ async function toolEstimateCosts() {
  * Tool: Submit the OinkVault investment transaction.
  */
 async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
-  console.log(`[Tool Call] Executing on-chain rebalance to target: ${targetPoolAddress}...`);
+  console.log(`[Tool Call] Executing on-chain rebalance to target: ${formatPoolName(targetPoolAddress)}...`);
   if (!account || !sourceWalletClient) {
     throw new Error("Allocator account is not initialized.");
   }
@@ -347,11 +384,11 @@ async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
 
           // Skip if the amount is less than 0.01 USDC (10000 Wei)
           if (withdrawAmount < 10000n) {
-            console.log(`  Skipping withdrawal from ${pool} as the balance is negligible: ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC`);
+            console.log(`  Skipping withdrawal from ${formatPoolName(pool)} as the balance is negligible: ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC`);
             continue;
           }
 
-          console.log(`  Withdrawing ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC from old pool: ${pool}...`);
+          console.log(`  Withdrawing ${formatUnits(withdrawAmount, USD_DECIMALS)} USDC from old pool: ${formatPoolName(pool)}...`);
           
           try {
             const withdrawTx = await sourceWalletClient.writeContract({
@@ -373,7 +410,7 @@ async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
             });
             
             await sourcePublicClient.waitForTransactionReceipt({ hash: withdrawTx });
-            console.log(`  Successfully withdrew from ${pool}. Tx: ${withdrawTx}`);
+            console.log(`  Successfully withdrew from ${formatPoolName(pool)}. Tx: ${withdrawTx}`);
           } catch (err: any) {
             console.warn(`  Warning: Failed to withdraw from old pool ${pool}:`, err.message || err);
           }
@@ -400,7 +437,7 @@ async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
       return { success: true, message: "No funds available to allocate.", isMock: false };
     }
 
-    console.log(`  Investing ${formatUnits(rebalanceAmount, USD_DECIMALS)} USDC into target pool: ${targetPoolAddress}...`);
+    console.log(`  Investing ${formatUnits(rebalanceAmount, USD_DECIMALS)} USDC into target pool: ${formatPoolName(targetPoolAddress)}...`);
     const txHash = await sourceWalletClient.writeContract({
       address: OINK_VAULT_ADDRESS,
       abi: oinkVaultAbi,
@@ -409,7 +446,7 @@ async function toolExecuteRebalance(amount: number, targetPoolAddress: string) {
     });
 
     await sourcePublicClient.waitForTransactionReceipt({ hash: txHash });
-    console.log(`  Successfully invested in ${targetPoolAddress}. Tx: ${txHash}`);
+    console.log(`  Successfully invested in ${formatPoolName(targetPoolAddress)}. Tx: ${txHash}`);
 
     return { success: true, txHash, isMock: false };
   } catch (error: any) {
@@ -555,7 +592,7 @@ You must use your tools sequentially:
 
     // Print the final reasoning text from the model
     console.log(`\n🤖 [AI Agent Output]:`);
-    console.log(response.response.text());
+    console.log(replaceAddressesInText(response.response.text()));
 
   } catch (err: any) {
     console.error(`❌ Error in Gemini AI execution:`, err.message || err);
